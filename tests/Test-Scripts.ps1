@@ -21,6 +21,9 @@ if ($LASTEXITCODE) { throw 'EXE help test failed.' }
 $temp=Join-Path $env:TEMP ('ChatGPTUpdater-selftest-'+[Guid]::NewGuid().ToString('N'))
 try {
     New-Item -ItemType Directory $temp | Out-Null
+    # The runner TEMP value may use RUNNER~1, while Get-ChildItem expands it.
+    # Normalize first so relative paths are not cut using a short-path length.
+    $temp=(Get-Item -LiteralPath $temp).FullName
     $portable=Split-Path $Executable -Parent
     Copy-Item (Join-Path $portable '*') $temp -Recurse
     $target=Join-Path $temp 'chatgpt-update.exe'
@@ -28,6 +31,7 @@ try {
     $candidate=Join-Path $work 'package'
     New-Item -ItemType Directory $candidate -Force | Out-Null
     Copy-Item (Join-Path $portable '*') $candidate -Recurse
+    $candidate=(Get-Item -LiteralPath $candidate).FullName
     $records=@(Get-ChildItem $candidate -Recurse -File | ForEach-Object {
         @{ path=$_.FullName.Substring($candidate.Length+1).Replace('\','/'); size=$_.Length; sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
     })
@@ -52,6 +56,7 @@ try {
         & $hostExe -NoProfile -File (Join-Path $temp 'scripts/replace-updater.ps1') -PlanPath $planPath -NoPause
         if ($LASTEXITCODE -eq 0) { throw 'Locked target replacement unexpectedly succeeded.' }
     } finally { $lock.Dispose() }
+    if (-not (Test-Path -LiteralPath (Join-Path $plan.previous 'README.md'))) { throw 'Late-failure test did not reach the replacement phase.' }
     if ([IO.File]::ReadAllText((Join-Path $temp 'README.md')) -cne $oldReadme) { throw 'Partial replacement failed to restore original README.' }
     if ((& $target --verify-package | Out-String).Trim() -cne $expected -or $LASTEXITCODE) { throw 'Rollback did not preserve valid original scripts/EXE.' }
     Write-Host 'PASS: late failure rolls back changed components without deleting original EXE'
