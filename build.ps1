@@ -30,6 +30,7 @@ try {
     # Windows PowerShell 5.1 Compress-Archive can emit backslashes in ZIP names.
     # Emit canonical forward-slash entries instead; do not weaken the strict
     # self-update ZIP allowlist to accept ambiguous separators or traversal.
+    Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::Open((Join-Path $out 'chatgpt-update-windows-x64.zip'), [IO.Compression.ZipArchiveMode]::Create)
     try {
