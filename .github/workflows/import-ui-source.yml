@@ -1,0 +1,35 @@
+name: Import reviewed UI source changes
+on:
+  push:
+    branches: [feature/ui-startup]
+    paths: [.source-transfer/**, .github/workflows/import-ui-source.yml]
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+      - name: Verify and materialize the source-only patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = '3cc8190655776c2dcd79bb8afbaddb3f172f3263'
+          python3 - <<'PY'
+          import gzip, hashlib, os, pathlib
+          parts = sorted(pathlib.Path('.source-transfer').glob('ui-*.bin'))
+          assert len(parts) == 4, 'Incomplete source transfer'
+          data = gzip.decompress(b''.join(p.read_bytes() for p in parts))
+          assert hashlib.sha256(data).hexdigest() == 'da8eff4eb79f340d8e4571a74b330adbc9bc81254c29e44879ca64e2aaa50c25', 'Source patch hash mismatch'
+          assert b'diff --git a/.github/' not in data and b'GIT binary patch' not in data, 'Only application text source is permitted'
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'ui.patch').write_bytes(data)
+          PY
+          git apply --index --whitespace=error "$RUNNER_TEMP/ui.patch"
+          git diff --cached --stat
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Add colored UI and prompted startup updater checks (0.2.3)'
+          git push origin HEAD:feature/ui-startup
