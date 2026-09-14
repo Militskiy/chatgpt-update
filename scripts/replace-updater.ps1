@@ -9,11 +9,17 @@ try {
     $plan = Get-Content -LiteralPath $PlanPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $target = [IO.Path]::GetFullPath([string]$plan.target)
     $candidate = [IO.Path]::GetFullPath([string]$plan.candidate)
+    # .NET Framework can expand an 8.3 directory name (e.g. RUNNER~1).
+    # Normalize all compared paths consistently, including a not-yet-created rollback file.
+    $previous = [IO.Path]::GetFullPath([string]$plan.previous)
+    $plan.target = $target
+    $plan.candidate = $candidate
+    $plan.previous = $previous
     $work = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($PlanPath))
     if ([IO.Path]::GetDirectoryName($candidate) -cne $work -or [IO.Path]::GetDirectoryName($work) -ine [IO.Path]::GetDirectoryName($target)) { throw 'Unexpected self-update staging layout.' }
     if ([IO.Path]::GetFileName($candidate) -cne 'chatgpt-update.exe' -or [IO.Path]::GetExtension($target) -ine '.exe') { throw 'Unexpected executable path.' }
     if ([string]$plan.sha256 -notmatch '^[a-f0-9]{64}$' -or [string]$plan.newVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid replacement plan.' }
-    if (-not ([string]$plan.previous).StartsWith($target + '.', [StringComparison]::OrdinalIgnoreCase) -or -not ([string]$plan.previous).EndsWith('.previous')) { throw 'Invalid rollback path.' }
+    if (-not $previous.StartsWith($target + '.', [StringComparison]::OrdinalIgnoreCase) -or -not $previous.EndsWith('.previous', [StringComparison]::OrdinalIgnoreCase)) { throw ('Invalid rollback path. Target={0}; rollback={1}' -f $target, $previous) }
     function Note([string]$message) {
         Write-Host $message
         Add-Content -LiteralPath ([string]$plan.log) -Value ('{0} {1}' -f ([DateTime]::UtcNow.ToString('o')), $message) -Encoding UTF8

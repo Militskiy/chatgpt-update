@@ -17,37 +17,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      # One-time import of the reviewed source package. Readable files are committed.
-      # This archive contains no workflows, binaries, credentials or app state.
-      - name: Import initial source package when present
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        shell: pwsh
-        run: |
-          if (-not (Test-Path '.bootstrap/source-01.bin')) { exit 0 }
-          $archive = Join-Path $env:RUNNER_TEMP 'chatgpt-update-source.zip'
-          $stream = [IO.File]::Create($archive)
-          try {
-            Get-ChildItem '.bootstrap/source-*.bin' | Sort-Object Name | ForEach-Object {
-              $bytes = [IO.File]::ReadAllBytes($_.FullName)
-              $stream.Write($bytes, 0, $bytes.Length)
-            }
-          } finally { $stream.Dispose() }
-          $expected = '4e4823ea8f5e0f01623c84aabde5e7a075568aa6e0d4e28d483b4786f2d27029'
-          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) { throw 'Source package hash mismatch' }
-          $staging = Join-Path $env:RUNNER_TEMP ('source-' + [Guid]::NewGuid().ToString('N'))
-          Expand-Archive $archive $staging
-          Get-ChildItem $staging -Force | ForEach-Object {
-            if ($_.Name -in @('.git', '.github', '.bootstrap')) { throw 'Forbidden path in source package' }
-            Copy-Item -LiteralPath $_.FullName -Destination . -Recurse -Force
-          }
-          Remove-Item .bootstrap -Recurse -Force
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add --all
-          git commit -m 'Import portable updater source, tests and documentation'
-          if ($LASTEXITCODE) { throw 'Source commit failed' }
-          git push origin HEAD:main
-          if ($LASTEXITCODE) { throw 'Source push failed; not publishing a release' }
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: stable
