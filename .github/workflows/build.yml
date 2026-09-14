@@ -65,7 +65,7 @@ jobs:
             dist/reviewed-source.zip
             scan-results/
           if-no-files-found: error
-      - name: Publish review prerelease only - never promote stable automatically
+      - name: Publish version-scoped test release or review prerelease
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         shell: pwsh
         env:
@@ -78,6 +78,19 @@ jobs:
           $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
           if ($LASTEXITCODE) { throw 'Cannot query releases' }
           if (@($releases | Where-Object tag_name -eq $tag).Count) { Write-Host 'Version already exists; no assets were replaced.'; exit 0 }
+          $channelArgs = @('--prerelease', '--latest=false')
+          $releaseTitle = "ChatGPT Update $version - security review candidate"
+          if (Test-Path -LiteralPath 'release-approval.json') {
+            $approval = Get-Content release-approval.json -Raw | ConvertFrom-Json
+            if ([string]$approval.version -ceq $version) {
+              if ([string]$approval.channel -cne 'normal-self-update-test') { throw 'Unknown approved release channel' }
+              if ([string]::IsNullOrWhiteSpace([string]$approval.reason)) { throw 'Missing version-scoped approval reason' }
+              $channelArgs = @('--latest=true')
+              $releaseTitle = "ChatGPT Update $version - self-update test (unsigned)"
+              Write-Host 'Maintainer-approved normal-channel delivery test; NOT a Microsoft security clearance.'
+            }
+          }
           $target = git rev-parse HEAD
-          gh release create $tag dist/chatgpt-update-windows-x64.zip dist/SHA256SUMS.txt scan-results/defender-report.json scan-results/custom-scan.txt scan-results/cloud-connection.txt --repo $env:GITHUB_REPOSITORY --target $target --prerelease --latest=false --title "ChatGPT Update $version - security review candidate" --notes-file RELEASE_NOTES.md
-          if ($LASTEXITCODE) { throw 'Prerelease publication failed' }
+          if ($LASTEXITCODE) { throw 'Cannot resolve release source commit' }
+          gh release create $tag dist/chatgpt-update-windows-x64.zip dist/SHA256SUMS.txt scan-results/defender-report.json scan-results/custom-scan.txt scan-results/cloud-connection.txt --repo $env:GITHUB_REPOSITORY --target $target @channelArgs --title $releaseTitle --notes-file RELEASE_NOTES.md
+          if ($LASTEXITCODE) { throw 'Release publication failed' }

@@ -19,7 +19,7 @@ GitHub Actions run 34838739834 downloaded that exact hash and scanned it without
 
 The folder package removes embedded-script extraction and the command-line execution-policy override. Scripts are visible and hash-bound to the executable. Self-update validates an exact complete package and retains rollback copies. These changes reduce unnecessary opaque behavior but do not establish why Defender flagged v0.1.0. Do not repeatedly rebuild or alter packing merely to seek a different classifier result.
 
-CI runs an updated-definition custom scan over the payload and release ZIP. `-DisableRemediation` is used ONLY for the custom scan: Microsoft's scanner documentation says it ignores exclusions, includes archives and records detections without remediating the evidence. It does not disable real-time protection or change preferences. Positive detections and scan failures stop publication. Reports explicitly state missing cloud/real-time coverage. No unsigned prototype is promoted to stable automatically during this investigation.
+CI runs an updated-definition custom scan over the payload and release ZIP. `-DisableRemediation` is used ONLY for the custom scan: Microsoft's scanner documentation says it ignores exclusions, includes archives and records detections without remediating the evidence. It does not disable real-time protection or change preferences. Positive detections and scan failures stop publication. Reports explicitly state missing cloud/real-time coverage. No unsigned prototype is promoted to stable automatically during this investigation without a documented, version-scoped maintainer approval.
 
 ## Resolving a continuing detection
 
@@ -36,3 +36,7 @@ References:
 A trusted signing identity is not available in this project yet. No fake/self-signed certificate is installed to manufacture trust. For enterprise distribution, have IT review and sign the scripts before generating embedded hashes; sign the compiled EXE; package and scan the final signed bytes. Signing identifies the publisher but is not an antivirus clearance.
 
 Never put `.codex` state, backups, tokens, certificates/private keys, or confidential data into this public repository or public scanner submissions.
+
+## v0.2.1 normal-channel self-update test
+
+The maintainer reported a successful personal-PC test of v0.2.0 and requested a minor new version to exercise the installed application's updater. Since v0.2.0 queries only GitHub's latest normal release and rejects prereleases, `release-approval.json` records a **version-scoped delivery-channel exception for 0.2.1**. All scan gates and disclosed coverage limitations remain. This is not Microsoft analyst clearance, confirmation of a false positive, or approval for corporate distribution. Subsequent versions default to prerelease without another matching approval. No signing certificate/service is configured yet.

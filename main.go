@@ -190,6 +190,7 @@ func menu() error {
 	for {
 		fmt.Printf("\nChatGPT Update %s | portable Windows app\n", version)
 		fmt.Println("------------------------------------------------")
+		fmt.Println("Tip: 1 updates ChatGPT; 4 updates this utility.")
 		fmt.Println("1) Check for ChatGPT update / install")
 		fmt.Println("2) Create backup")
 		fmt.Println("3) Restore backup")

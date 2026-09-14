@@ -1,11 +1,15 @@
-# v0.2.0 — portable-folder security review candidate
+# v0.2.1 - self-update test release
 
-**Prerelease, unsigned, not a Microsoft malware-analysis clearance.** The original v0.1.0 has a reported Wacatac.B!ml detection and is marked do not use pending investigation. Do not restore or unblock it.
+A small visible change for testing the portable updater's 0.2.0 -> 0.2.1 update path:
 
-This candidate removes automatic extraction of embedded PowerShell scripts and all runtime ExecutionPolicy overrides. The complete portable ZIP contains the EXE plus visible, hash-checked companion scripts. Keep them together. Existing organizational script policies remain authoritative and may require IT-approved signing.
+- The menu now displays: **Tip: 1 updates ChatGPT; 4 updates this utility.**
+- Version is now 0.2.1; ChatGPT installation, backup/restore, package validation and self-update code are unchanged.
+- Added a menu regression test. Existing Windows PowerShell 5.1/7, replacement/rollback, Go and Defender custom-scan checks remain required.
 
-The numbered menu, ChatGPT update/install/checklist engine, optional upgrade backups, manual backups, restore, and user PATH commands remain. Self-update now validates and replaces the complete portable package, retains the old components, and tests rollback on failed replacement.
+From your existing, permitted v0.2.0 portable folder, choose **4** or run `chatgpt-update self-update`. Confirm the update, wait for the helper to finish, then restart the app and check `chatgpt-update --version` returns `0.2.1`.
 
-CI requires an updated Defender custom scan of the payload and final ZIP before executing the build, followed by Go tests and Windows PowerShell 5.1/7 smoke tests. `defender-report.json` and raw scanner logs record the exact artifact hashes and scan coverage limitations. A no-detection local scan does not guarantee that corporate/cloud/download protection will allow the package.
+**Release-channel exception:** the maintainer requested a live self-update test after a successful personal-PC test of v0.2.0. This version is published as a normal GitHub release because v0.2.0 only queries `/releases/latest` and rejects prereleases. This is delivery metadata, NOT Microsoft security clearance or corporate deployment approval. The exception applies only to version 0.2.1; subsequent versions default to prerelease without a matching release approval.
 
-This review release is NOT selected automatically by stable self-update. Extract the complete ZIP manually to a clean folder; do not use v0.1.0 to migrate. If protection flags this candidate, stop and submit its exact hash/file for Microsoft/IT review. No security exclusions or bypasses are required or recommended.
+**Unsigned.** The original v0.1.0 Wacatac report remains unresolved; do not unblock v0.1.0. Updated-definition custom-scan evidence is attached, including cloud/real-time coverage limitations. Signing credentials have not been configured. Do not disable antivirus, change organizational policy or add exclusions to use this build.
+
+Keep the EXE and its companion scripts together. Updating this utility does not update ChatGPT or modify `.codex` state. Previous portable components are retained for rollback.

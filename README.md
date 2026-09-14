@@ -1,10 +1,16 @@
 # ChatGPT Update — portable Windows application
 
-**v0.2.0 security-hardening review candidate. Windows x64.** This is an independent utility, not an OpenAI or Microsoft product. Use only with your organization's approval.
+**v0.2.1 self-update test release. Windows x64.** This is an independent utility, not an OpenAI or Microsoft product. Use only with your organization's approval.
 
 > **The original v0.1.0 EXE has a reported Defender `Trojan:Win32/Wacatac.B!ml` detection. Do not unblock that release.** The cause remains unconfirmed; no Microsoft analyst clearance has been obtained. See [SECURITY.md](SECURITY.md) and the release's Defender report. A local scan is not a guarantee of endpoint/cloud acceptance.
 
-## What changed
+## v0.2.1 update test
+
+The menu now shows `Tip: 1 updates ChatGPT; 4 updates this utility.` Use option **4** or `chatgpt-update self-update` in your permitted v0.2.0 folder, then restart the app and check `chatgpt-update --version` reports `0.2.1`.
+
+Version 0.2.1 is a maintainer-requested exception to prerelease-only publishing: v0.2.0 can discover only normal GitHub releases. Normal-channel metadata is **not** an antivirus clearance. This package remains unsigned, the earlier v0.1.0 detection remains unresolved, and all scan/report requirements remain in force. `release-approval.json` scopes this exception to 0.2.1; future versions default to prerelease unless separately approved.
+
+## What changed in v0.2.0
 
 The app is now a **portable folder**, not a self-extracting single EXE. PowerShell scripts are visible alongside the application, and their exact SHA-256 hashes are bound into the EXE at build time. Missing or altered scripts stop execution. The program no longer embeds/extracts PowerShell code into TEMP, passes `-ExecutionPolicy Bypass`, or alters execution policy. No obfuscator/packer is used and Go debug information is retained.
 
@@ -35,7 +41,7 @@ Launch `chatgpt-update.exe`, or run from that folder:
 
 No MSI, Go, Git, WinGet, PowerShell 7 or Microsoft account is required on the target PC. Windows PowerShell 5.1 and permission to deploy signed AppX packages are required.
 
-**Existing PowerShell execution policy is respected.** Restricted/AllSigned/RemoteSigned policies or downloaded-file markings may block unsigned scripts. The app will stop and direct you to IT; it does not change policy or unblock files. For an organization requiring signed scripts, signing must occur before computing embedded hashes and building the EXE. After that, sign the EXE and scan the final signed distributable. This review candidate is unsigned.
+**Existing PowerShell execution policy is respected.** Restricted/AllSigned/RemoteSigned policies or downloaded-file markings may block unsigned scripts. The app will stop and direct you to IT; it does not change policy or unblock files. For an organization requiring signed scripts, signing must occur before computing embedded hashes and building the EXE. After that, sign the EXE and scan the final signed distributable. This package is unsigned.
 
 ## Menu and commands
 
@@ -105,4 +111,4 @@ Run the script tests under both Windows PowerShell 5.1 and PowerShell 7. `build.
 
 CI scans the entire portable folder and final ZIP with updated Defender security intelligence **before launching the built EXE**. A detection, missing scanner, failed signature update, ambiguous result, or changed/deleted artifact blocks distribution. Reports retain hashes, scanner/signature versions, raw results, and cloud/real-time coverage limitations. Tests do not install ChatGPT or change real user PATH/backups.
 
-During investigation the workflow publishes **review prereleases only**, never automatically promotes a stable release. No matching standalone EXE is published, preventing old updaters from silently replacing themselves with an incomplete folder-based package. Candidate artifacts are not vendor malware-analysis clearance. Unchanged version tags/assets are never overwritten.
+During investigation the workflow defaults to **review prereleases**. Normal-channel publishing requires a matching version-scoped maintainer approval in `release-approval.json`; the 0.2.1 exception exists solely to exercise v0.2.0's stable-only self-update client. No matching standalone EXE is published, preventing old updaters from silently replacing themselves with an incomplete folder-based package. Release metadata and candidate artifacts are not vendor malware-analysis clearance. Unchanged version tags/assets are never overwritten.
