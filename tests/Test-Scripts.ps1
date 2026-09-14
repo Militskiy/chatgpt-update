@@ -78,4 +78,28 @@ try {
     $state=Get-Content -LiteralPath $statusFile -Raw | ConvertFrom-Json
     if ($state.phase -cne 'success' -or $state.version -cne $expected) { throw 'Successful replacement status not recorded.' }
     Write-Host 'PASS: tampered-stage rejection, persistent results and complete-package replacement with preserved old files'
+    # Interactive helper mode: no -NoPause, and the same -NoExit that keeps
+    # pre-script failures readable in the production launcher. There must be
+    # no Read-Host on success and no shell left behind after completion.
+    New-Item -ItemType Directory $candidate -Force | Out-Null
+    Copy-Item (Join-Path $portable '*') $candidate -Recurse
+    $plan.previous=Join-Path $temp '.chatgpt-update-previous-auto-close'
+    $plan | ConvertTo-Json -Depth 5 | Set-Content $planPath -Encoding UTF8
+    $processInfo=New-Object Diagnostics.ProcessStartInfo
+    $processInfo.FileName=$hostExe
+    $processInfo.Arguments='-NoLogo -NoProfile -NoExit -File "{0}" -PlanPath "{1}"' -f (Join-Path $temp 'scripts/replace-updater.ps1'),$planPath
+    $processInfo.UseShellExecute=$false
+    $processInfo.RedirectStandardInput=$true
+    $child=[Diagnostics.Process]::Start($processInfo)
+    try {
+        # Keep stdin OPEN but send no input; a Read-Host would hang this test.
+        if (-not $child.WaitForExit(10000)) { throw 'Success left the helper waiting for input or at a shell prompt.' }
+        if ($child.ExitCode -ne 0) { throw 'Auto-closing helper returned an error.' }
+        $state=Get-Content -LiteralPath $statusFile -Raw | ConvertFrom-Json
+        if ($state.phase -cne 'success' -or $state.version -cne $expected) { throw 'Auto-close happened without a verified update.' }
+        Write-Host 'PASS: successful helper exits without input even with -NoExit; caller remains running'
+    } finally {
+        if (-not $child.HasExited) { $child.Kill(); $child.WaitForExit() }
+        $child.Dispose()
+    }
 } finally { Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue }

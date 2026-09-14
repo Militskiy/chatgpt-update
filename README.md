@@ -1,8 +1,35 @@
 # ChatGPT Update - portable Windows application
 
-**0.2.3: color UI and startup updater checks. Windows x64. Unsigned.** Independent utility, not an OpenAI or Microsoft product. Use only with your organization's approval.
+**0.2.4: automatic helper closure after verified success. Windows x64. Unsigned.** Independent utility, not an OpenAI or Microsoft product. Use only with your organization's approval.
 
 > The original 0.1.0 EXE has a reported Defender `Trojan:Win32/Wacatac.B!ml` detection. Do not unblock it. The cause remains unconfirmed and no Microsoft analyst clearance has been obtained. See SECURITY.md and the release's Defender report. A local scan does not guarantee endpoint/cloud acceptance.
+
+## New in 0.2.4: close on success, retain failures
+
+The update helper no longer asks for Enter after a successful replacement. Once the
+new EXE and companion scripts have been verified and the result saved, the helper
+explicitly closes its own PowerShell host, including when launched with `-NoExit`.
+Your original terminal is not closed. The next menu launch still reports the saved result.
+
+On a handled update error the details and log path remain visible and the helper waits
+for Enter. Pressing Enter closes that helper; it does not leave an extra shell prompt.
+A security/parse error that prevents the script from starting also remains in the
+separate console (the launcher retains `-NoExit` for this purpose). No error is
+silently dismissed. `-NoPause` remains available for automated helper tests/recovery.
+
+**The security warning is separate and is not suppressed by this release.** The
+package is still unsigned. Depending on the existing PowerShell policy and downloaded
+file markings, Windows may require approval or block the script. The supported
+corporate solution is review/signing of the companion scripts and a publisher trusted
+by the organization, as well as EXE signing where required. Signing only the EXE does
+not sign the scripts. No signing credentials have been configured; the program does
+not change policy, remove Internet-zone markings, add trusted certificates, or
+answer security prompts on the user's behalf. See SECURITY.md.
+
+**One-transition caveat:** updating FROM 0.2.3 still runs 0.2.3's old helper. That
+one update may still ask for Enter and leave its window open; close that helper only
+after its verified-success message. Updates started FROM 0.2.4 use the new behavior.
+Keep the whole portable folder together; do not edit or replace individual scripts.
 
 ## New in 0.2.3: color and startup checks
 
@@ -39,12 +66,12 @@ Flags work before or after commands. The child updater script also receives pres
 preferences. Unsupported/small terminals and redirected output fall back to readable text.
 Menu option **6** opens the offline preview. Spinners stop before asking for input.
 
-### Test the release from 0.2.2
+### Test the release from 0.2.2/0.2.3
 
-Run your existing `chatgpt-update self-update` or choose 4. Accept 0.2.3, wait for the
-helper's completion message, and relaunch. Verify `chatgpt-update --version` prints 0.2.3.
-The startup auto-check feature is first available after that upgrade. With 0.2.3 current,
-it should report no newer release; it will ask to install when a later eligible release exists.
+Run your existing `chatgpt-update self-update` or choose 4; v0.2.3 also checks on
+menu startup. Accept 0.2.4, wait for verified success, and relaunch. Verify
+`chatgpt-update --version` prints 0.2.4. The source version's helper runs this
+transition; the auto-close change applies to subsequent updates started by 0.2.4.
 
 ## Fixing the update loop
 
@@ -160,4 +187,4 @@ Run the script suite in Windows PowerShell 5.1 and PowerShell 7. Build regenerat
 
 CI scans the full portable folder and final ZIP with updated Defender intelligence before launching the built EXE. Detections, unavailable/failed scanners or modified artifacts prevent publication. Raw reports retain file hashes and cloud/real-time coverage limitations. Windows tests now exercise actual new-console input/output, automatic helper readiness, parent exit with a locked target, early reopen, logged validation failure, package replacement and rollback. Tests use temporary fixtures; they do not install ChatGPT or change real user PATH/backups.
 
-Publication defaults to prerelease. A normal-channel release requires matching version-scoped maintainer approval in `release-approval.json`. Version 0.2.2 is approved for the requested handoff fix/test, not a Microsoft malware clearance. Existing tags and assets are never replaced.
+Publication defaults to prerelease. A normal-channel release requires matching version-scoped maintainer approval in `release-approval.json`. Version 0.2.4 is approved for the requested helper-window fix/test, not a Microsoft malware clearance. Existing tags and assets are never replaced.

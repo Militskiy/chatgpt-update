@@ -1,30 +1,30 @@
-# v0.2.3 - color UI, animated activity and startup update approval
+# v0.2.4 - close the update helper automatically after success
 
-- Colored, grouped numbered menu; added option 6 for an offline UI preview.
-- Animated ASCII activity indicators and elapsed time for updater checks, validation,
-  backup/restore and helper readiness. Spinners stop before prompts.
-- Updater download progress includes real transferred bytes, one percentage, speed and ETA;
-  final 100% is printed only after size/hash verification. No fake installation percentage.
-- ChatGPT step panel adds animated transfer-stage markers and elapsed-step labels.
-- Interactive menu startup automatically checks this repository for a newer updater.
-  Five-second metadata timeout; asks Y/N before download/install. N or unavailable metadata
-  still opens the menu. Normal releases only. CLI/preview/verification calls stay independent.
-- Added --skip-update-check, --no-color, --no-animation and global --plain; honors NO_COLOR.
-- Retained the v0.2.2 PowerShell-child environment correction, real-console handoff,
-  readiness acknowledgement, lock continuity, verification and rollback.
+- Successful self-updates no longer ask for Enter. The helper explicitly closes its
+  own PowerShell host after package verification, logging, status persistence and cleanup.
+- Handled errors still show their details/log path and wait for Enter; that input then
+  closes the helper instead of leaving a spare PowerShell prompt.
+- Pre-script security/parse errors remain visible through the launcher's existing
+  `-NoExit` option. Execution policy, download markings and trust settings are unchanged.
+- Added regression coverage for the actual interactive new-console handoff: verified
+  success exits without input, failed validation leaves its error window open, and
+  both PowerShell 5.1 and 7 tests exercise success with `-NoExit` and an open stdin.
+- Colors, startup Y/N updates, parent/helper handshake, locks, rollback, ChatGPT
+  deployment and optional .codex backups remain unchanged.
 
-## Test using your current 0.2.2
+## First update from 0.2.3
 
-Choose 4 or run `chatgpt-update self-update`; accept 0.2.3. Wait for the helper to say
-`[OK] Updater package is now 0.2.3.`, then relaunch. No manual ZIP migration is needed
-from 0.2.2. New menu/animation/startup behavior becomes active after this update.
-Use menu 6 or `chatgpt-update preview` for a simulated, offline demonstration.
+Run the existing app and approve its startup update offer, or select menu 4. This
+transition is run by 0.2.3's old helper, so its final Enter prompt/window can appear
+one last time. Wait for verified success, close that helper and relaunch; --version
+should return 0.2.4. The next self-update started by 0.2.4 will auto-close on success.
 
-The startup prompt for a newer version will appear when a later eligible release is published.
-Startup timeout, decline, current/old releases, invalid metadata, and approved/failing handoff
-are covered by offline tests; no test silently installs ChatGPT or touches real user data.
+## Security prompt
 
-**Unsigned.** Normal-channel publication is scoped to the maintainer's request to test
-self-updating and this UI. It is not Microsoft security clearance. The v0.1.0 Wacatac
-report remains unresolved. Attached Defender custom-scan evidence records missing
-cloud/real-time coverage; keep protections enabled and respect corporate policy.
+Still unsigned. This release does not bypass, auto-answer or remove a security
+warning. Correctly signed companion scripts and organizational publisher trust are
+the route for policy-controlled deployment; signing the EXE alone is insufficient.
+No signing identity is configured. Keep security controls enabled. The original
+v0.1.0 Wacatac report remains unresolved. Defender custom-scan evidence is attached
+with its hosted-runner cloud/real-time limitations, not a Microsoft analyst verdict.
+Normal-channel delivery is version-scoped to this maintainer-requested UI fix/test.
