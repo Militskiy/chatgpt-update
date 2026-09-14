@@ -27,7 +27,16 @@ try {
         '{0}  {1}' -f $hash, $name
     }
     [IO.File]::WriteAllText((Join-Path $portable 'FILES.sha256'), (($lines -join "`n") + "`n"), [Text.Encoding]::ASCII)
-    Compress-Archive -Path (Join-Path $portable '*') -DestinationPath (Join-Path $out 'chatgpt-update-windows-x64.zip')
+    # Windows PowerShell 5.1 Compress-Archive can emit backslashes in ZIP names.
+    # Emit canonical forward-slash entries instead; do not weaken the strict
+    # self-update ZIP allowlist to accept ambiguous separators or traversal.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::Open((Join-Path $out 'chatgpt-update-windows-x64.zip'), [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($name in @($names) + @('FILES.sha256')) {
+            [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, (Join-Path $portable $name), $name, [IO.Compression.CompressionLevel]::Optimal)
+        }
+    } finally { $archive.Dispose() }
     $zipHash = (Get-FileHash (Join-Path $out 'chatgpt-update-windows-x64.zip') -Algorithm SHA256).Hash.ToLowerInvariant()
     [IO.File]::WriteAllText((Join-Path $out 'SHA256SUMS.txt'), "$zipHash  chatgpt-update-windows-x64.zip`n", [Text.Encoding]::ASCII)
     Write-Host "Built portable folder $version. Defender scan is REQUIRED before executing/publishing the built app."
