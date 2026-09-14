@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -33,6 +34,7 @@ func runScript(name string, args ...string) error {
 		return e
 	}
 	cmd := exec.Command(powershellPath(), powershellArgs(script, args...)...)
+	cmd.Env = windowsPSEnvironment(os.Environ())
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if e := cmd.Run(); e != nil {
 		return fmt.Errorf("Windows PowerShell failed: %w. Existing execution policy is respected; ask IT to approve/sign these scripts if blocked. No security settings were changed", e)
@@ -60,9 +62,22 @@ func startConsoleProcess(exe string, args []string, dir string) (*syscall.Proces
 	if err != nil {
 		return nil, err
 	}
+	environment := windowsPSEnvironment(os.Environ())
+	sort.SliceStable(environment, func(i, j int) bool { return strings.ToUpper(environment[i]) < strings.ToUpper(environment[j]) })
+	var block []uint16
+	for _, entry := range environment {
+		value, e := syscall.UTF16FromString(entry)
+		if e != nil {
+			return nil, e
+		}
+		block = append(block, value...)
+	}
+	if len(block) == 0 { block = append(block, 0) }
+	block = append(block, 0)
+	// CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT. No handles inherited.
 	si := syscall.StartupInfo{Cb: uint32(unsafe.Sizeof(syscall.StartupInfo{}))}
 	var pi syscall.ProcessInformation
-	if err = syscall.CreateProcess(app, command, nil, nil, false, 0x00000010, nil, cwd, &si, &pi); err != nil {
+	if err = syscall.CreateProcess(app, command, nil, nil, false, 0x00000410, &block[0], cwd, &si, &pi); err != nil {
 		return nil, err
 	}
 	syscall.CloseHandle(pi.Thread)
