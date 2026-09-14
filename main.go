@@ -1,4 +1,4 @@
-// ChatGPT Update is a portable console frontend for the embedded Windows updater.
+// ChatGPT Update is a portable console frontend for the visible, integrity-checked Windows updater scripts.
 package main
 
 import (
@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-//go:embed VERSION scripts/*.ps1
+//go:embed VERSION script-hashes.json
 var assets embed.FS
 var version = embeddedVersion()
 var input = bufio.NewReader(os.Stdin)
@@ -48,6 +48,18 @@ func confirm(prompt string) bool {
 }
 func main() {
 	args := os.Args[1:]
+	if len(args) == 1 && args[0] == "--verify-package" {
+		exe, err := os.Executable()
+		if err == nil {
+			err = verifyScripts(filepath.Dir(exe))
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println(version)
+		return
+	}
 	if len(args) > 0 && (args[0] == "--version" || args[0] == "version") {
 		fmt.Println(version)
 		return
@@ -84,7 +96,7 @@ chatgpt-update update --exact           Require OpenAI's advertised build
 chatgpt-update update --plain           Scrolling output instead of live steps
 chatgpt-update backup                  Back up USERPROFILE\.codex
 chatgpt-update restore                 Select a backup and confirm restoration
-chatgpt-update self-update             Download a newer release of this EXE
+chatgpt-update self-update             Update the complete portable folder from a verified release ZIP
 chatgpt-update self-update --yes        Approve a newer updater noninteractively
 chatgpt-update path add                Add this EXE's folder to your user PATH
 chatgpt-update path remove             Remove this folder from your user PATH
@@ -92,8 +104,9 @@ chatgpt-update preview                 Simulated ChatGPT update progress
 chatgpt-update --version               Print only the updater version
 
 Updates require the public internet; backup/restore work offline.
-No MSI, Store account, PowerShell 7 or Go installation is required.
-The embedded scripts use Windows PowerShell 5.1 and existing Windows policies.
+Extract the WHOLE portable ZIP. No MSI, Store account, PowerShell 7 or Go is needed.
+Visible scripts beside the EXE use Windows PowerShell 5.1 and existing Windows policies.
+No scripts are extracted into TEMP; no execution policy override is applied.
 ChatGPT's MSIX comes from the third-party Wangnov/codex-app-mirror.
 The updater EXE comes from Militskiy/chatgpt-update GitHub Releases.
 `, version)

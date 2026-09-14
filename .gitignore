@@ -4,3 +4,6 @@
 *.previous
 *.log
 /.tools/
+
+scan-results/
+review/

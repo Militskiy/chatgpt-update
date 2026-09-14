@@ -1,75 +1,116 @@
 ﻿#requires -Version 5.1
-# Separate console helper. Never changes ChatGPT, projects or backup state.
+# Visible, versioned self-update helper. Respects the caller's execution policy.
+# Only the portable app's fixed file set is changed. No ChatGPT/project/state writes.
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)] [string]$PlanPath, [switch]$NoPause)
+param([Parameter(Mandatory=$true)][string]$PlanPath, [switch]$NoPause)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$oldMoved = $false; $plan = $null; $ok = $false; $work = $null; $ready = $null
+$ok = $false; $plan = $null; $work = $null; $mutex = $null; $ready = $null
+$changed = New-Object 'System.Collections.Generic.List[string]'
+$old = @{}; $intended = @{}; $root = $null; $previous = $null
+$names = @('VERSION','README.md','FILES.sha256','scripts/path.ps1','scripts/prepare-state.ps1','scripts/update-chatgpt.ps1','scripts/replace-updater.ps1','chatgpt-update.exe')
+function Check-Path([string]$Path) {
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Links/junctions are not supported: $Path" }
+}
+function Hash([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
+function Note([string]$Text) {
+    Write-Host $Text
+    if ($null -ne $plan) { Add-Content -LiteralPath ([string]$plan.log) -Value (('{0} {1}' -f [DateTime]::UtcNow.ToString('o'), $Text)) -Encoding UTF8 }
+}
 try {
     $plan = Get-Content -LiteralPath $PlanPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $target = [IO.Path]::GetFullPath([string]$plan.target)
+    $root = [IO.Path]::GetDirectoryName($target)
     $candidate = [IO.Path]::GetFullPath([string]$plan.candidate)
-    # .NET Framework can expand an 8.3 directory name (e.g. RUNNER~1).
-    # Normalize all compared paths consistently, including a not-yet-created rollback file.
     $previous = [IO.Path]::GetFullPath([string]$plan.previous)
-    $plan.target = $target
-    $plan.candidate = $candidate
-    $plan.previous = $previous
     $work = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($PlanPath))
-    if ([IO.Path]::GetDirectoryName($candidate) -cne $work -or [IO.Path]::GetDirectoryName($work) -ine [IO.Path]::GetDirectoryName($target)) { throw 'Unexpected self-update staging layout.' }
-    if ([IO.Path]::GetFileName($candidate) -cne 'chatgpt-update.exe' -or [IO.Path]::GetExtension($target) -ine '.exe') { throw 'Unexpected executable path.' }
-    if ([string]$plan.sha256 -notmatch '^[a-f0-9]{64}$' -or [string]$plan.newVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid replacement plan.' }
-    if (-not $previous.StartsWith($target + '.', [StringComparison]::OrdinalIgnoreCase) -or -not $previous.EndsWith('.previous', [StringComparison]::OrdinalIgnoreCase)) { throw ('Invalid rollback path. Target={0}; rollback={1}' -f $target, $previous) }
-    function Note([string]$message) {
-        Write-Host $message
-        Add-Content -LiteralPath ([string]$plan.log) -Value ('{0} {1}' -f ([DateTime]::UtcNow.ToString('o')), $message) -Encoding UTF8
+    if ([IO.Path]::GetFileName($target) -cne 'chatgpt-update.exe') { throw 'Unexpected executable name.' }
+    if ([IO.Path]::GetDirectoryName($work) -ine $root -or [IO.Path]::GetFileName($work) -notlike '.chatgpt-update-stage-*') { throw 'Unexpected staging layout.' }
+    if ($candidate -ine (Join-Path $work 'package')) { throw 'Unexpected package directory.' }
+    if ([IO.Path]::GetDirectoryName($previous) -ine $root -or [IO.Path]::GetFileName($previous) -notlike '.chatgpt-update-previous-*') { throw 'Unexpected rollback directory.' }
+    if (Test-Path -LiteralPath $previous) { throw 'Rollback directory already exists; refusing overwrite.' }
+    if ([string]$plan.newVersion -notmatch '^\d+\.\d+\.\d+$' -or [string]$plan.lockName -notmatch '^Local\\Militskiy\.ChatGPTUpdater-[a-f0-9]{24}$') { throw 'Invalid replacement plan.' }
+    foreach ($path in @($root,$work,$candidate,(Join-Path $candidate 'scripts'),(Join-Path $root 'scripts'))) { Check-Path $path }
+    if (@($plan.files).Count -ne $names.Count) { throw 'Incorrect package file set.' }
+    foreach ($record in $plan.files) {
+        $name = [string]$record.path
+        if ($names -cnotcontains $name -or $intended.ContainsKey($name) -or [string]$record.sha256 -notmatch '^[a-f0-9]{64}$') { throw 'Unexpected or duplicated component.' }
+        $intended[$name] = [string]$record.sha256
+        $source = Join-Path $candidate $name
+        Check-Path $source
+        if ((Get-Item -LiteralPath $source).Length -ne [long]$record.size -or (Hash $source) -cne $intended[$name]) { throw "Staged component changed: $name" }
     }
-    Note '[>>] Waiting for the previous updater process to exit...'
+    if (@(Get-ChildItem -LiteralPath $candidate -Recurse -File -Force).Count -ne $names.Count) { throw 'Unexpected files in staged package.' }
+    Note '[>>] Waiting for the previous updater to exit...'
     $parent = Get-Process -Id ([int]$plan.parentPid) -ErrorAction SilentlyContinue
-    if ($null -ne $parent) { if (-not $parent.WaitForExit(60000)) { throw 'Old updater is still running. No executable was replaced.' } }
-    if ((Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$plan.sha256) { throw 'Staged executable checksum changed. Aborting.' }
-    $reported = (& $candidate --version | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $reported -cne [string]$plan.newVersion) { throw 'New executable failed its version probe.' }
-    if (Test-Path -LiteralPath ([string]$plan.previous)) { throw 'Rollback path already exists; nothing was overwritten.' }
-    # Prepare a complete sibling first; never overwrite a running EXE in place.
-    $ready = $target + '.ready-' + [Guid]::NewGuid().ToString('N')
-    Copy-Item -LiteralPath $candidate -Destination $ready
-    if ((Get-FileHash -LiteralPath $ready -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$plan.sha256) { throw 'Prepared executable verification failed.' }
-    Note '[>>] Preserving the previous executable...'
-    Move-Item -LiteralPath $target -Destination ([string]$plan.previous)
-    $oldMoved = $true
-    Move-Item -LiteralPath $ready -Destination $target
-    if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$plan.sha256) { throw 'Installed executable verification failed.' }
-    $reported = (& $target --version | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $reported -cne [string]$plan.newVersion) { throw 'Installed executable failed its version probe.' }
-    Note ('[OK] Updater is now {0}.' -f $plan.newVersion)
-    Note ('Previous executable retained: {0}' -f $plan.previous)
-    Note 'ChatGPT and its data were not changed. Run chatgpt-update again to open the menu.'
-    $ok = $true
-}
-catch {
-    $message = $_.Exception.Message
-    Write-Host ('[FAIL] {0}' -f $message) -ForegroundColor Red
-    if ($null -ne $plan) {
-        try { Add-Content -LiteralPath ([string]$plan.log) -Value ('FAIL: ' + $message) -Encoding UTF8 } catch { }
-        if ($oldMoved) {
-            try {
-                if (Test-Path -LiteralPath ([string]$plan.target)) {
-                    $currentHash = (Get-FileHash -LiteralPath ([string]$plan.target) -Algorithm SHA256).Hash.ToLowerInvariant()
-                    if ($currentHash -cne [string]$plan.sha256) { throw 'Target differs from staged release; manual rollback required.' }
-                    Remove-Item -LiteralPath ([string]$plan.target) -Force
-                }
-                Move-Item -LiteralPath ([string]$plan.previous) -Destination ([string]$plan.target)
-                Write-Host '[OK] Restored the previous executable.'
-            } catch { Write-Host ('Original executable retained at {0}. Rollback issue: {1}' -f $plan.previous, $_.Exception.Message) -ForegroundColor Yellow }
-        }
-        Write-Host ('Log: {0}' -f $plan.log)
+    if ($null -ne $parent -and -not $parent.WaitForExit(60000)) { throw 'Previous updater is still running.' }
+    $created = $false
+    $mutex = New-Object Threading.Mutex($false, ([string]$plan.lockName), [ref]$created)
+    if (-not $created) { throw 'Another updater operation is running. No files were changed.' }
+    $candidateExe = Join-Path $candidate 'chatgpt-update.exe'
+    $reported = (& $candidateExe --verify-package | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $reported -cne [string]$plan.newVersion) { throw 'New EXE/component verification failed.' }
+    # Snapshot every current component before the first replacement. Missing
+    # optional documentation is recorded so rollback restores the original set.
+    New-Item -ItemType Directory -Path $previous | Out-Null
+    foreach ($name in $names) {
+        $dest = Join-Path $root $name
+        if (Test-Path -LiteralPath $dest) {
+            Check-Path $dest
+            $old[$name] = Hash $dest
+            $saved = Join-Path $previous $name
+            New-Item -ItemType Directory -Path (Split-Path $saved -Parent) -Force | Out-Null
+            Copy-Item -LiteralPath $dest -Destination $saved
+            if ((Hash $saved) -cne $old[$name]) { throw "Cannot preserve component: $name" }
+        } else { $old[$name] = $null }
     }
-}
-finally {
+    Note '[>>] Replacing the complete portable package; previous files are retained...'
+    foreach ($name in $names) {
+        $dest = Join-Path $root $name
+        $ready = $dest + '.ready-' + [Guid]::NewGuid().ToString('N')
+        Copy-Item -LiteralPath (Join-Path $candidate $name) -Destination $ready
+        if ((Hash $ready) -cne $intended[$name]) { throw "Prepared component hash mismatch: $name" }
+        if (Test-Path -LiteralPath $dest) {
+            Check-Path $dest
+            if ($null -eq $old[$name] -or (Hash $dest) -cne $old[$name]) { throw "Current component changed concurrently: $name" }
+        } elseif ($null -ne $old[$name]) { throw "Current component disappeared: $name" }
+        Move-Item -LiteralPath $ready -Destination $dest -Force
+        $ready = $null
+        $changed.Add($name)
+        if ((Hash $dest) -cne $intended[$name]) { throw "Installed component mismatch: $name" }
+    }
+    $reported = (& $target --verify-package | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $reported -cne [string]$plan.newVersion) { throw 'Installed package verification failed.' }
+    Note ('[OK] Updater package is now {0}.' -f $plan.newVersion)
+    Note ('Previous package retained: {0}' -f $previous)
+    Note 'Run chatgpt-update again to open the menu. ChatGPT and .codex were not changed.'
+    $ok = $true
+} catch {
+    Write-Host ('[FAIL] {0}' -f $_.Exception.Message) -ForegroundColor Red
+    if ($changed.Count -gt 0) {
+        for ($i = $changed.Count - 1; $i -ge 0; $i--) {
+            $name = $changed[$i]; $dest = Join-Path $root $name
+            try {
+                if (Test-Path -LiteralPath $dest) {
+                    Check-Path $dest
+                    if ((Hash $dest) -cne $intended[$name]) { throw 'Target was changed externally; manual rollback required.' }
+                }
+                if ($null -ne $old[$name]) {
+                    $saved = Join-Path $previous $name
+                    if ((Hash $saved) -cne $old[$name]) { throw 'Rollback copy verification failed.' }
+                    Copy-Item -LiteralPath $saved -Destination $dest -Force
+                    if ((Hash $dest) -cne $old[$name]) { throw 'Restored component verification failed.' }
+                } elseif (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Force }
+                Write-Host ("[OK] Rolled back {0}" -f $name)
+            } catch { Write-Host ("Manual recovery required for {0}: {1}. Preserved files: {2}" -f $name,$_.Exception.Message,$previous) -ForegroundColor Yellow }
+        }
+    }
+    if ($null -ne $plan) { Write-Host ('Log: {0}' -f $plan.log) }
+} finally {
+    if ($null -ne $mutex) { $mutex.Dispose() }
     if ($null -ne $ready -and (Test-Path -LiteralPath $ready)) { Remove-Item -LiteralPath $ready -Force -ErrorAction SilentlyContinue }
     if ($ok -and $null -ne $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
-    if (-not $NoPause) { [void](Read-Host 'Press Enter to close this update window') }
-    if ((Split-Path -Leaf $PSScriptRoot) -like 'ChatGPTUpdater-script-*') { Remove-Item -LiteralPath $PSScriptRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    if (-not $NoPause) { [void](Read-Host 'Press Enter to close this window') }
 }
 if (-not $ok) { exit 1 }

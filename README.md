@@ -1,18 +1,43 @@
-# ChatGPT Update — portable Windows app
+# ChatGPT Update — portable Windows application
 
-A small, single-file console app for installing/updating the stable `OpenAI.Codex` Windows desktop package without the Microsoft Store client, creating/restoring `.codex` backups, and updating this utility from this repository's releases.
+**v0.2.0 security-hardening review candidate. Windows x64.** This is an independent utility, not an OpenAI or Microsoft product. Use only with your organization's approval.
 
-**Prototype v0.1.0. Windows x64 only.** Not an OpenAI or Microsoft product. Use only where your organization's software policies permit it. This utility does not bypass AppLocker/WDAC/Group Policy, import certificates, disable signature validation, or obtain Store licenses.
+> **The original v0.1.0 EXE has a reported Defender `Trojan:Win32/Wacatac.B!ml` detection. Do not unblock that release.** The cause remains unconfirmed; no Microsoft analyst clearance has been obtained. See [SECURITY.md](SECURITY.md) and the release's Defender report. A local scan is not a guarantee of endpoint/cloud acceptance.
+
+## What changed
+
+The app is now a **portable folder**, not a self-extracting single EXE. PowerShell scripts are visible alongside the application, and their exact SHA-256 hashes are bound into the EXE at build time. Missing or altered scripts stop execution. The program no longer embeds/extracts PowerShell code into TEMP, passes `-ExecutionPolicy Bypass`, or alters execution policy. No obfuscator/packer is used and Go debug information is retained.
+
+These are transparency and security improvements, not a claim that we identified Defender's classifier trigger. No antivirus exclusions, security disabling, certificate imports, quarantine restoration or corporate-policy bypasses are implemented.
 
 ## Start
 
-Download **chatgpt-update.exe** from [Releases](../../releases/latest). Keep it in a writable folder, for example `%LOCALAPPDATA%\Programs\ChatGPTUpdater`. Double-click it, or run it from PowerShell:
+Download **chatgpt-update-windows-x64.zip** from the intended release. Extract the **entire** ZIP to a writable permanent folder, for example `%LOCALAPPDATA%\Programs\ChatGPTUpdater`. Do not copy just the EXE.
+
+```text
+ChatGPTUpdater\
+  chatgpt-update.exe
+  VERSION
+  FILES.sha256
+  README.md
+  scripts\
+    path.ps1
+    prepare-state.ps1
+    replace-updater.ps1
+    update-chatgpt.ps1
+```
+
+Launch `chatgpt-update.exe`, or run from that folder:
 
 ```powershell
 .\chatgpt-update.exe
 ```
 
-The console menu accepts numbers:
+No MSI, Go, Git, WinGet, PowerShell 7 or Microsoft account is required on the target PC. Windows PowerShell 5.1 and permission to deploy signed AppX packages are required.
+
+**Existing PowerShell execution policy is respected.** Restricted/AllSigned/RemoteSigned policies or downloaded-file markings may block unsigned scripts. The app will stop and direct you to IT; it does not change policy or unblock files. For an organization requiring signed scripts, signing must occur before computing embedded hashes and building the EXE. After that, sign the EXE and scan the final signed distributable. This review candidate is unsigned.
+
+## Menu and commands
 
 ```text
 1) Check for ChatGPT update / install
@@ -23,98 +48,61 @@ The console menu accepts numbers:
 0) Exit
 ```
 
-Option 1 checks versions and asks Y/N before installing anything. Upgrades ask a separate optional backup question. A fresh install does not create an upgrade backup. The live step/checklist and download bar from updater script v5.4 are retained.
+Option 1 retains updater engine v5.4: installed/feed/mirror versions, explicit Y/N consent, optional upgrade backup, cached MSIX reuse, package identity/publisher checks, and the live checklist. A fresh install has no upgrade backup. The ChatGPT package is stable `OpenAI.Codex_2p2nqsd0c76g0`; downloads still use the third-party `Wangnov/codex-app-mirror`. Windows validates the MSIX during `Add-AppxPackage`; missing approved dependencies or corporate restrictions are reported, not bypassed.
 
-There is no MSI installation. PowerShell 7, Go, Git, WinGet and a Microsoft account are **not needed to run the app**. Windows PowerShell 5.1 is used internally for AppX deployment and Windows-specific operations. The relevant scripts are embedded in the executable, extracted to a random temporary directory when needed, and cleaned up afterward.
-
-## Add the command to PATH
-
-Move the EXE to its permanent writable folder first, then use menu option 5 or:
+Option 5 adds the current folder to **user PATH**, after confirmation. Move the full folder to its permanent location first. Open a new terminal afterward.
 
 ```powershell
-.\chatgpt-update.exe path add
-```
-
-This changes **user PATH only**, after confirmation. Close all terminal windows and reopen a terminal from Start; the already-open parent PowerShell cannot inherit a changed environment. Then:
-
-```powershell
-chatgpt-update
-```
-
-Remove the PATH entry before moving/removing the folder:
-
-```powershell
+chatgpt-update check
+chatgpt-update update
+chatgpt-update update --no-backup
+chatgpt-update update --backup
+chatgpt-update update --exact
+chatgpt-update update --plain
+chatgpt-update backup
+chatgpt-update restore
+chatgpt-update self-update
+chatgpt-update self-update --yes
+chatgpt-update path add
 chatgpt-update path remove
+chatgpt-update preview
+chatgpt-update --version
+chatgpt-update --verify-package
 ```
 
-Portable mode leaves the EXE where you put it; it does not create a Start-menu shortcut or an Apps & Features entry. Backup/cache/log files are outside the EXE folder as described below.
+`check` never installs. `preview` is a simulated offline progress display. `--verify-package` only checks the local scripts against this executable's embedded hashes.
 
-## Commands
+## Backup and restore
 
-| Command | Behavior |
-|---|---|
-| `chatgpt-update` | Numbered menu |
-| `chatgpt-update check` | Read installed/feed/mirror versions, no installation |
-| `chatgpt-update update` | Check and ask to install/update ChatGPT |
-| `chatgpt-update update --no-backup` | No upgrade backup question; still asks to install |
-| `chatgpt-update update --backup` | Choose upgrade backup; still asks to install |
-| `chatgpt-update update --exact` | Only the exact OpenAI-advertised build |
-| `chatgpt-update update --plain` | Scrolling output instead of live checklist |
-| `chatgpt-update backup` | Create a local, verified `.codex` snapshot |
-| `chatgpt-update restore` | Choose a snapshot and type RESTORE to confirm |
-| `chatgpt-update self-update` | Check this repository and ask to replace the updater |
-| `chatgpt-update self-update --yes` | Update the utility without a Y/N question |
-| `chatgpt-update preview` | Simulated progress; no network or app changes |
-| `chatgpt-update --version` | Print the **updater's** version, not ChatGPT's |
+Backups cover **`%USERPROFILE%\.codex` only**, not project folders, all app data, or the installed app version. They can contain credentials: keep them private. No backups are uploaded. Custom `CODEX_HOME` locations are not managed by this release.
 
-## Two separate update channels
+Keep desktop and CLI/IDE sessions closed while copying state. A manual backup is verified using file SHA-256 hashes. Restore verifies/stages first, requires typing `RESTORE`, preserves the current state in a before-restore backup, and attempts rollback on a failed swap. Legacy `.codex` folder backups are supported with a warning when a historical checksum manifest is unavailable. Links/junctions are not followed.
 
-**ChatGPT/Codex desktop app:** the embedded engine reads OpenAI's `windows-store-update.json` as a version reference and scans **third-party `Wangnov/codex-app-mirror`** stable Windows x64 assets. It may offer a mirrored build above or below the feed, but only with an explicit mismatch warning and never as a downgrade. Missing frameworks are reported, not downloaded from guessed endpoints. Windows checks signed-package deployment with `Add-AppxPackage`. The engine verifies identity, publisher, version, package family and available checksums. A mirror checksum is not independent proof of authenticity.
+Manual and engine-created backups are under `%USERPROFILE%\CodexBackups`. The unchanged engine keeps its cache below `%TEMP%\ChatGPT-CorpUpdater-*`. Self-update logs are under `%LOCALAPPDATA%\ChatGPTUpdater\Logs`.
 
-**This utility:** menu option 4 reads the latest stable release in **`Militskiy/chatgpt-update`**. It verifies asset URL, file size, SHA-256 and PE architecture, then starts a separate Windows helper. The old process exits before replacement. The helper rechecks the hash and `--version`, preserves the existing EXE as a timestamped `.previous` file, performs replacement, verifies it and attempts rollback on failure. Run the utility again after completion. Source commits alone are not downloadable updates; a newer published release and version are required.
+## Updater self-update
 
-Release hashes rely on repository/GitHub integrity; they are not a substitute for code signing. This prototype EXE is **unsigned**. Corporate application control/SmartScreen/antivirus may block it. Ask IT to review/approve it instead of disabling protections.
+Option 4 reads **stable** releases of `Militskiy/chatgpt-update`. It requires the complete portable ZIP, verifies its release checksum, exact file allowlist, component hashes, VERSION and Windows x64 executable format, then hands the operation to the already-installed visible helper. It does not download a script from `main` and execute it.
 
-## Backups and restoration
+After the main process exits, the helper verifies the staged package, snapshots old package files, replaces components with the EXE last, and verifies the installed package. Previous files remain in `.chatgpt-update-previous-*` inside the portable folder. An unsuccessful swap attempts component-by-component rollback. Reopen `chatgpt-update` after the helper completes. If execution policy blocks the helper, no replacement occurs.
 
-Scope is **`%USERPROFILE%\.codex` only**. Project repositories, arbitrary working folders, desktop-app LocalState and other app locations are not covered. This is a state restore, **not an app-version rollback**. A newer app's database migrations can limit compatibility with older snapshots. Close all CLI/IDE integrations and finish desktop tasks before either operation; the utility detects ordinary `codex` processes and closes only processes belonging to this user's installed stable desktop package. Other integrations may still write state, so the user's explicit confirmation that tasks are finished matters.
+v0.1.0 cannot automatically migrate to this folder format; do not run the flagged EXE to attempt migration. Extract the complete new package to a clean folder instead. Review prereleases are not selected by self-update and are not evidence of security approval.
 
-Backups are folders under `%USERPROFILE%\CodexBackups`. New manual backups include a file-size/SHA-256 manifest. The utility refuses symlinks/junctions/reparse points and aborts if files change during copying. Backups from the previous PowerShell script (a timestamp folder containing `.codex`) can be restored, with a warning that no original manifest is available.
+## Build, tests and release gating
 
-Restoration verifies and stages a full copy first. The current `.codex` is preserved in a `*-before-restore` backup, then the staged folder replaces it. It does not merge snapshots or silently delete current state. The before-restore snapshot can itself be selected to undo a restore. Backups may contain credentials; do not publish them, send them to coworkers or add them to this repository. No backup is uploaded by this app. Non-default `CODEX_HOME` is not supported by the manual backup/restore commands in v0.1.0.
-
-## Locations and network
-
-- EXE: wherever you placed it. Self-update requires write access to this folder.
-- Backups: `%USERPROFILE%\CodexBackups`.
-- App download cache: the existing `%TEMP%\ChatGPT-CorpUpdater-*` folders; matching earlier downloads can be reused.
-- Helper scripts: random `%TEMP%\ChatGPTUpdater-script-*` folders, normally removed after use.
-- Self-update logs: `%LOCALAPPDATA%\ChatGPTUpdater\Logs`.
-- Rollback EXE: next to the portable EXE, with a timestamp and `.previous` extension.
-
-Internet access to OpenAI's feed and GitHub/CDN is needed for update commands. Backup and restore are offline. No GitHub token is required for public releases; API rate limits can apply. The Go self-updater honors `HTTPS_PROXY`/`HTTP_PROXY`; it does not automatically interpret a corporate PAC script or implement integrated proxy authentication. TLS verification is never disabled.
-
-The embedded PowerShell process uses `-NoProfile -ExecutionPolicy Bypass` for that child process only, matching the earlier standalone invocation. It does not modify the persisted execution policy, and enforced Group Policy takes precedence.
-
-## Build, test and release
-
-A supported Go SDK is needed **only for development**. No third-party Go modules are used.
+Only the Go standard library is used. Build on Windows with a supported Go SDK:
 
 ```powershell
-go test ./...
 .\build.ps1
+.\tools\Test-Defender.ps1
+# Only after the scan succeeds:
+go vet ./...
+go test -v ./...
 .\tests\Test-Scripts.ps1
 ```
 
-The source includes Go tests for backup/restore integrity, safe replacement, legacy backups, version comparison, checksum parsing, URL validation and arguments. Offline PowerShell tests parse the scripts, exercise the prior update engine's selection/progress helpers, and test EXE replacement using copies in a temporary directory. These tests do **not** install ChatGPT or use real user state.
+Run the script tests under both Windows PowerShell 5.1 and PowerShell 7. `build.ps1` regenerates `script-hashes.json` from the exact script bytes that it packages, so line endings and approved code-signing changes are accounted for. Do not modify individual scripts after building/distributing the EXE.
 
-The GitHub Actions workflow builds on Windows, runs tests in both Windows PowerShell 5.1 and PowerShell 7, and publishes `chatgpt-update.exe` plus `SHA256SUMS.txt`. To publish an update, change `VERSION` (e.g. `0.1.1`), update `RELEASE_NOTES.md`, and push reviewed changes to `main`. The workflow never overwrites an already-published version. The public release is what menu option 4 detects.
+CI scans the entire portable folder and final ZIP with updated Defender security intelligence **before launching the built EXE**. A detection, missing scanner, failed signature update, ambiguous result, or changed/deleted artifact blocks distribution. Reports retain hashes, scanner/signature versions, raw results, and cloud/real-time coverage limitations. Tests do not install ChatGPT or change real user PATH/backups.
 
-Manual on-device testing is still needed for corporate proxy behavior, live console rendering, organizational AppX policies and real ChatGPT deployment.
-
-## References
-
-- [Microsoft: Add-AppxPackage](https://learn.microsoft.com/powershell/module/appx/add-appxpackage)
-- [Microsoft: execution policies](https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_execution_policies)
-- [GitHub: release-asset API and digests](https://docs.github.com/rest/releases/assets)
-- [Third-party MSIX mirror](https://github.com/Wangnov/codex-app-mirror)
+During investigation the workflow publishes **review prereleases only**, never automatically promotes a stable release. No matching standalone EXE is published, preventing old updaters from silently replacing themselves with an incomplete folder-based package. Candidate artifacts are not vendor malware-analysis clearance. Unchanged version tags/assets are never overwritten.

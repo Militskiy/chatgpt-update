@@ -151,7 +151,7 @@ func TestVersionOrdering(t *testing.T) {
 	}
 }
 func TestSelfUpdateURLAndAssetValidation(t *testing.T) {
-	good := "https://github.com/Militskiy/chatgpt-update/releases/download/v0.1.0/chatgpt-update.exe"
+	good := "https://github.com/Militskiy/chatgpt-update/releases/download/v0.2.0/chatgpt-update-windows-x64.zip"
 	if e := validateAssetURL(good); e != nil {
 		t.Fatal(e)
 	}
@@ -160,18 +160,18 @@ func TestSelfUpdateURLAndAssetValidation(t *testing.T) {
 			t.Fatalf("bad URL accepted: %s", s)
 		}
 	}
-	a := releaseAsset{Name: exeAsset, URL: good, State: "uploaded", Size: 2048}
+	a := releaseAsset{Name: portableAsset, URL: good, State: "uploaded", Size: 2048}
 	r := releaseInfo{Tag: "v0.1.0", Assets: []releaseAsset{a}}
-	if _, _, e := chooseExecutable(r); e != nil {
+	if _, _, e := choosePortable(r); e != nil {
 		t.Fatal(e)
 	}
 	r.Prerelease = true
-	if _, _, e := chooseExecutable(r); e == nil {
+	if _, _, e := choosePortable(r); e == nil {
 		t.Fatal("prerelease accepted")
 	}
 	r.Prerelease = false
 	r.Assets = append(r.Assets, a)
-	if _, _, e := chooseExecutable(r); e == nil {
+	if _, _, e := choosePortable(r); e == nil {
 		t.Fatal("duplicate asset accepted")
 	}
 }
@@ -203,17 +203,49 @@ func TestUpdateArguments(t *testing.T) {
 		}
 	}
 }
-func TestEmbeddedResources(t *testing.T) {
+func TestSidecarIntegrity(t *testing.T) {
 	if _, e := parseVersion(version); e != nil {
 		t.Fatal(e)
 	}
-	for _, f := range []string{"update-chatgpt.ps1", "prepare-state.ps1", "path.ps1", "replace-updater.ps1"} {
-		b, e := assets.ReadFile("scripts/" + f)
-		if e != nil || len(b) < 50 {
-			t.Fatal(f, e)
+	if e := verifyScripts("."); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := assets.ReadFile("scripts/update-chatgpt.ps1"); e == nil {
+		t.Fatal("scripts must not be embedded")
+	}
+	temp := t.TempDir()
+	for _, name := range scriptNames {
+		b, e := os.ReadFile(filepath.Join("scripts", name))
+		if e != nil {
+			t.Fatal(e)
 		}
+		writeTest(t, filepath.Join(temp, "scripts", name), string(b))
+	}
+	if e := verifyScripts(temp); e != nil {
+		t.Fatal(e)
+	}
+	writeTest(t, filepath.Join(temp, "scripts", "path.ps1"), "modified")
+	if e := verifyScripts(temp); e == nil {
+		t.Fatal("modified sidecar accepted")
+	}
+	os.Remove(filepath.Join(temp, "scripts", "path.ps1"))
+	if _, e := verifiedScript(temp, "path.ps1"); e == nil {
+		t.Fatal("missing sidecar accepted")
+	}
+	if _, e := verifiedScript(temp, "../other.ps1"); e == nil {
+		t.Fatal("script traversal accepted")
 	}
 }
+func TestNoPolicyOverride(t *testing.T) {
+	a := powershellArgs("C:\\Program Files\\Updater\\scripts\\path.ps1", "-Action", "add")
+	if strings.Contains(strings.ToLower(strings.Join(a, " ")), "executionpolicy") {
+		t.Fatal("policy override")
+	}
+	if a[2] != "-File" || len(a) != 6 {
+		t.Fatal(a)
+	}
+}
+
 func TestRecordsRejectDuplicates(t *testing.T) {
 	r := fileRecord{Path: "a", Size: 1, SHA256: "x"}
 	if recordsEqual([]fileRecord{r, r}, []fileRecord{r, r}) {

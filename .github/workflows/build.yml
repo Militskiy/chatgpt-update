@@ -1,7 +1,8 @@
-name: Build, test and release portable app
+name: Build, scan and test portable review candidate
 on:
   push:
-    branches: [main]
+    branches: [main, security/portable-hardening]
+    paths-ignore: [.github/workflows/security-review.yml]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -16,37 +17,55 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
         with:
           go-version: stable
           cache: false
-      - name: Go tests
+      - name: Build inspectable portable folder and ZIP (do not execute yet)
+        shell: powershell
+        run: ./build.ps1
+      - name: Defender scan gate - updated intelligence, full payload and ZIP
+        id: scan
+        shell: powershell
+        run: ./tools/Test-Defender.ps1
+      - name: Retain scanner evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: defender-scan-report
+          path: scan-results/
+          if-no-files-found: warn
+      - name: Go tests after scan
         shell: pwsh
         run: |
           go vet ./...
           if ($LASTEXITCODE) { throw 'go vet failed' }
           go test -v ./...
           if ($LASTEXITCODE) { throw 'go test failed' }
-      - name: Build Windows x64 EXE
-        shell: powershell
-        run: ./build.ps1
       - name: Windows PowerShell 5.1 tests
         shell: powershell
         run: ./tests/Test-Scripts.ps1
       - name: PowerShell 7 tests
         shell: pwsh
         run: ./tests/Test-Scripts.ps1
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - name: Archive exact source for reproducible review
+        shell: pwsh
+        run: |
+          git archive --format=zip --output=dist/reviewed-source.zip HEAD
+          if ($LASTEXITCODE) { throw 'Source archive failed' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: chatgpt-update-windows-x64
+          name: chatgpt-update-reviewed-candidate
           path: |
-            dist/chatgpt-update.exe
+            dist/chatgpt-update-windows-x64.zip
             dist/SHA256SUMS.txt
+            dist/reviewed-source.zip
+            scan-results/
           if-no-files-found: error
-      - name: Publish a new stable version (existing releases are never replaced)
+      - name: Publish review prerelease only - never promote stable automatically
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         shell: pwsh
         env:
@@ -54,12 +73,11 @@ jobs:
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
           $tag = 'v' + $version
+          $r = Get-Content scan-results/defender-report.json -Raw | ConvertFrom-Json
+          if ($r.result -cne 'custom-scan-no-detections') { throw 'Missing passing custom scan report' }
           $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
           if ($LASTEXITCODE) { throw 'Cannot query releases' }
-          if (@($releases | Where-Object tag_name -eq $tag).Count -gt 0) {
-            Write-Host "Release $tag already exists. Bump VERSION for a new release; existing assets were not changed."
-            exit 0
-          }
+          if (@($releases | Where-Object tag_name -eq $tag).Count) { Write-Host 'Version already exists; no assets were replaced.'; exit 0 }
           $target = git rev-parse HEAD
-          gh release create $tag dist/chatgpt-update.exe dist/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --target $target --title "ChatGPT Update $version (portable Windows x64)" --notes-file RELEASE_NOTES.md
-          if ($LASTEXITCODE) { throw 'Release publication failed' }
+          gh release create $tag dist/chatgpt-update-windows-x64.zip dist/SHA256SUMS.txt scan-results/defender-report.json scan-results/custom-scan.txt scan-results/cloud-connection.txt --repo $env:GITHUB_REPOSITORY --target $target --prerelease --latest=false --title "ChatGPT Update $version - security review candidate" --notes-file RELEASE_NOTES.md
+          if ($LASTEXITCODE) { throw 'Prerelease publication failed' }

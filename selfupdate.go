@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/sha256"
-	"debug/pe"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -21,7 +20,8 @@ import (
 const releaseRepo = "Militskiy/chatgpt-update"
 const releaseAPI = "https://api.github.com/repos/" + releaseRepo + "/releases/latest"
 const exeAsset = "chatgpt-update.exe"
-const maxExeSize = 100 << 20
+const portableAsset = "chatgpt-update-windows-x64.zip"
+const maxArchiveSize = 100 << 20
 
 type releaseAsset struct {
 	Name   string `json:"name"`
@@ -113,7 +113,7 @@ func httpGet(client *http.Client, raw string) (*http.Response, error) {
 	}
 	return resp, nil
 }
-func chooseExecutable(r releaseInfo) (releaseAsset, *releaseAsset, error) {
+func choosePortable(r releaseInfo) (releaseAsset, *releaseAsset, error) {
 	if r.Draft || r.Prerelease {
 		return releaseAsset{}, nil, errors.New("refusing draft/prerelease updater")
 	}
@@ -126,9 +126,9 @@ func chooseExecutable(r releaseInfo) (releaseAsset, *releaseAsset, error) {
 		if a.State != "uploaded" {
 			continue
 		}
-		if a.Name == exeAsset {
+		if a.Name == portableAsset {
 			if exe.Name != "" {
-				return exe, nil, errors.New("ambiguous EXE assets")
+				return exe, nil, errors.New("ambiguous portable ZIP assets")
 			}
 			exe = a
 		}
@@ -140,8 +140,8 @@ func chooseExecutable(r releaseInfo) (releaseAsset, *releaseAsset, error) {
 			checksum = &copy
 		}
 	}
-	if exe.Name == "" || exe.Size < 1024 || exe.Size > maxExeSize {
-		return exe, nil, errors.New("release has no valid Windows x64 portable executable")
+	if exe.Name == "" || exe.Size < 1024 || exe.Size > maxArchiveSize {
+		return exe, nil, errors.New("release has no complete Windows x64 portable ZIP (v0.1.0 single-EXE updates are not supported)")
 	}
 	if e := validateAssetURL(exe.URL); e != nil {
 		return exe, nil, e
@@ -167,7 +167,7 @@ func checksumFromText(text, name string) (string, error) {
 		found = strings.ToLower(fields[0])
 	}
 	if found == "" {
-		return "", errors.New("checksum entry for chatgpt-update.exe is missing")
+		return "", errors.New("checksum entry for chatgpt-update-windows-x64.zip is missing")
 	}
 	return found, nil
 }
@@ -194,7 +194,7 @@ func expectedChecksum(client *http.Client, exe releaseAsset, sum *releaseAsset) 
 		if e != nil {
 			return "", e
 		}
-		hash, e := checksumFromText(string(b), exeAsset)
+		hash, e := checksumFromText(string(b), portableAsset)
 		if e != nil {
 			return "", e
 		}
@@ -227,7 +227,7 @@ func (p *downloadProgress) Write(b []byte) (int, error) {
 	}
 	return len(b), nil
 }
-func downloadExe(client *http.Client, asset releaseAsset, expected, destination string) error {
+func downloadArchive(client *http.Client, asset releaseAsset, expected, destination string) error {
 	resp, e := httpGet(client, asset.URL)
 	if e != nil {
 		return e
@@ -254,29 +254,23 @@ func downloadExe(client *http.Client, asset releaseAsset, expected, destination 
 	if hex.EncodeToString(h.Sum(nil)) != expected {
 		return errors.New("SHA-256 verification failed; existing EXE not changed")
 	}
-	binary, e := pe.Open(destination)
-	if e != nil {
-		return fmt.Errorf("download is not a Windows PE executable: %w", e)
-	}
-	defer binary.Close()
-	if binary.Machine != pe.IMAGE_FILE_MACHINE_AMD64 {
-		return errors.New("download is not a Windows x64 executable")
-	}
+
 	return nil
 }
 
 type replacementPlan struct {
-	ParentPID  int    `json:"parentPid"`
-	Target     string `json:"target"`
-	Candidate  string `json:"candidate"`
-	SHA256     string `json:"sha256"`
-	NewVersion string `json:"newVersion"`
-	Previous   string `json:"previous"`
-	Log        string `json:"log"`
+	ParentPID  int          `json:"parentPid"`
+	Target     string       `json:"target"`
+	Candidate  string       `json:"candidate"`
+	NewVersion string       `json:"newVersion"`
+	Previous   string       `json:"previous"`
+	Log        string       `json:"log"`
+	LockName   string       `json:"lockName"`
+	Files      []fileRecord `json:"files"`
 }
 
 func selfUpdate(yes bool) error {
-	fmt.Println("[>>] Checking Militskiy/chatgpt-update public releases...")
+	fmt.Println("[>>] Checking Militskiy/chatgpt-update public stable releases...")
 	client := newHTTPClient()
 	resp, e := httpGet(client, releaseAPI)
 	if e != nil {
@@ -288,9 +282,8 @@ func selfUpdate(yes bool) error {
 	if e != nil {
 		return e
 	}
-	exe, sum, e := chooseExecutable(release)
-	if e != nil {
-		return e
+	if release.Draft || release.Prerelease {
+		return errors.New("release is not stable")
 	}
 	newer, e := newerVersion(release.Tag, version)
 	if e != nil {
@@ -302,32 +295,34 @@ func selfUpdate(yes bool) error {
 		fmt.Println("[OK] No newer stable updater release.")
 		return nil
 	}
+	asset, sum, e := choosePortable(release)
+	if e != nil {
+		return e
+	}
 	target, e := os.Executable()
 	if e != nil {
 		return e
 	}
+	root := filepath.Dir(target)
 	if isReparsePoint(target) {
-		return errors.New("move the real EXE into a writable folder; self-update does not replace links")
+		return errors.New("self-update does not replace links")
 	}
-	fmt.Println("Executable to replace:", target)
-	fmt.Println("The verified release replaces this EXE. ChatGPT and backups will NOT be changed.")
-	fmt.Println("Releases are unsigned; SHA-256 checks rely on the security of this GitHub repository.")
+	if e = verifyScripts(root); e != nil {
+		return e
+	}
+	fmt.Println("Portable folder to update:", root)
+	fmt.Println("The complete ZIP replaces this EXE and its companion scripts. ChatGPT/data are unchanged.")
+	fmt.Println("The package is unsigned. HTTPS/checksums rely on the security of this repository.")
 	if !yes && !confirm("Update the updater?") {
 		return nil
 	}
-	probe, e := os.CreateTemp(filepath.Dir(target), ".chatgpt-update-write-test-")
+	expected, e := expectedChecksum(client, asset, sum)
+	if e != nil {
+		return e
+	}
+	work, e := os.MkdirTemp(root, ".chatgpt-update-stage-")
 	if e != nil {
 		return fmt.Errorf("portable folder must be writable: %w", e)
-	}
-	probe.Close()
-	os.Remove(probe.Name())
-	expected, e := expectedChecksum(client, exe, sum)
-	if e != nil {
-		return e
-	}
-	work, e := os.MkdirTemp(filepath.Dir(target), ".chatgpt-update-stage-")
-	if e != nil {
-		return e
 	}
 	handedOff := false
 	defer func() {
@@ -335,35 +330,48 @@ func selfUpdate(yes bool) error {
 			os.RemoveAll(work)
 		}
 	}()
-	candidate := filepath.Join(work, exeAsset)
-	if e := downloadExe(client, exe, expected, candidate); e != nil {
+	archive := filepath.Join(work, portableAsset)
+	if e = downloadArchive(client, asset, expected, archive); e != nil {
 		return e
 	}
-	fmt.Println("[OK] Download size, SHA-256 and Windows x64 executable format verified.")
+	candidate := filepath.Join(work, "package")
+	next := strings.TrimPrefix(release.Tag, "v")
+	records, e := extractPortable(archive, candidate, next)
+	if e != nil {
+		return e
+	}
+	fmt.Println("[OK] ZIP hash, file set, component hashes, version and x64 EXE format verified.")
 	local := os.Getenv("LOCALAPPDATA")
 	if local == "" {
 		return errors.New("LOCALAPPDATA is not set")
 	}
 	logs := filepath.Join(local, "ChatGPTUpdater", "Logs")
-	if e := os.MkdirAll(logs, 0700); e != nil {
+	if e = os.MkdirAll(logs, 0700); e != nil {
+		return e
+	}
+	lockName, e := operationLockName()
+	if e != nil {
 		return e
 	}
 	id := uniqueName()
-	plan := replacementPlan{os.Getpid(), target, candidate, expected, strings.TrimPrefix(release.Tag, "v"), target + "." + id + ".previous", filepath.Join(logs, "self-update-"+id+".log")}
+	plan := replacementPlan{os.Getpid(), target, candidate, next,
+		filepath.Join(root, ".chatgpt-update-previous-"+id),
+		filepath.Join(logs, "self-update-"+id+".log"), lockName, records}
 	b, e := json.MarshalIndent(plan, "", "  ")
 	if e != nil {
 		return e
 	}
 	planPath := filepath.Join(work, "replacement.json")
-	if e := os.WriteFile(planPath, b, 0600); e != nil {
+	if e = os.WriteFile(planPath, b, 0600); e != nil {
 		return e
 	}
-	if e := startReplacementHelper(planPath); e != nil {
+	if e = startReplacementHelper(planPath); e != nil {
 		return e
 	}
 	handedOff = true
-	fmt.Println("[>>] Finishing in a new update window. This updater is exiting so its EXE can be replaced.")
+	fmt.Println("[>>] A visible helper window will finish after this updater exits.")
+	fmt.Println("If Windows blocks the helper, nothing is overwritten. Ask IT to approve the scripts.")
 	fmt.Println("Log:", plan.Log)
-	fmt.Println("After completion, run chatgpt-update again. A .previous copy is retained for rollback.")
+	fmt.Println("Run chatgpt-update again after completion. Previous package files are retained for rollback.")
 	return errUpdating
 }

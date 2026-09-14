@@ -3,13 +3,11 @@
 package main
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -17,46 +15,35 @@ import (
 func powershellPath() string {
 	return filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
 }
-func extractScript(name string) (string, string, error) {
-	b, e := assets.ReadFile("scripts/" + name)
+
+// Scripts are distributed as visible sidecar files. No extraction or policy override.
+func installedScript(name string) (string, error) {
+	exe, e := os.Executable()
 	if e != nil {
-		return "", "", e
+		return "", e
 	}
-	dir, e := os.MkdirTemp("", "ChatGPTUpdater-script-")
-	if e != nil {
-		return "", "", e
-	}
-	path := filepath.Join(dir, name)
-	if e := os.WriteFile(path, b, 0600); e != nil {
-		os.RemoveAll(dir)
-		return "", "", e
-	}
-	return dir, path, nil
+	return verifiedScript(filepath.Dir(exe), name)
 }
 func runScript(name string, args ...string) error {
-	dir, script, e := extractScript(name)
+	script, e := installedScript(name)
 	if e != nil {
 		return e
 	}
-	defer os.RemoveAll(dir)
-	// Process-only setting: organizational Group Policy remains authoritative.
-	all := append([]string{"-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script}, args...)
-	cmd := exec.Command(powershellPath(), all...)
+	cmd := exec.Command(powershellPath(), powershellArgs(script, args...)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if e := cmd.Run(); e != nil {
-		return fmt.Errorf("Windows PowerShell failed: %w (see the detailed error above)", e)
+		return fmt.Errorf("Windows PowerShell failed: %w. Existing execution policy is respected; ask IT to approve/sign these scripts if blocked. No security settings were changed", e)
 	}
 	return nil
 }
 func startReplacementHelper(planPath string) error {
-	dir, script, e := extractScript("replace-updater.ps1")
+	script, e := installedScript("replace-updater.ps1")
 	if e != nil {
 		return e
 	}
-	cmd := exec.Command(powershellPath(), "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-PlanPath", planPath)
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x00000010} // CREATE_NEW_CONSOLE
+	cmd := exec.Command(powershellPath(), powershellArgs(script, "-PlanPath", planPath)...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x00000010} // visible new console
 	if e := cmd.Start(); e != nil {
-		os.RemoveAll(dir)
 		return e
 	}
 	return cmd.Process.Release()
@@ -70,12 +57,11 @@ func isReparsePoint(path string) bool {
 	return e != nil || attr&syscall.FILE_ATTRIBUTE_REPARSE_POINT != 0
 }
 func acquireOperationLock() (func(), error) {
-	home, e := os.UserHomeDir()
+	lockName, e := operationLockName()
 	if e != nil {
 		return nil, e
 	}
-	sum := sha256.Sum256([]byte(strings.ToLower(home)))
-	name, _ := syscall.UTF16PtrFromString(fmt.Sprintf("Local\\Militskiy.ChatGPTUpdater-%x", sum[:12]))
+	name, _ := syscall.UTF16PtrFromString(lockName)
 	proc := syscall.NewLazyDLL("kernel32.dll").NewProc("CreateMutexW")
 	h, _, callErr := proc.Call(0, 0, uintptr(unsafe.Pointer(name)))
 	if h == 0 {

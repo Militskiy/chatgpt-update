@@ -5,15 +5,31 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Push-Location $PSScriptRoot
 try {
-    if (-not (Get-Command go -ErrorAction SilentlyContinue)) { throw 'Install a supported Go SDK to build; running the app does not need Go.' }
     $version = (Get-Content VERSION -Raw).Trim()
-    if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'VERSION must contain a stable three-part version.' }
-    New-Item -ItemType Directory -Path dist -Force | Out-Null
+    if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid VERSION.' }
+    $hashes = [ordered]@{}
+    foreach ($file in @(Get-ChildItem scripts -Filter *.ps1 | Sort-Object Name)) {
+        $hashes[$file.Name] = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'script-hashes.json'), ($hashes | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+    $out = Join-Path $PSScriptRoot 'dist'
+    if (Test-Path $out) { Remove-Item -LiteralPath $out -Recurse -Force }
+    $portable = Join-Path $out 'portable'
+    New-Item -ItemType Directory $portable -Force | Out-Null
     $env:GOOS = 'windows'; $env:GOARCH = 'amd64'; $env:CGO_ENABLED = '0'
-    & go build -trimpath -ldflags '-s -w' -o dist/chatgpt-update.exe .
-    if ($LASTEXITCODE -ne 0) { throw 'Go build failed.' }
-    $sha = (Get-FileHash dist/chatgpt-update.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-    [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'dist/SHA256SUMS.txt'), "$sha  chatgpt-update.exe`n", [Text.Encoding]::ASCII)
-    Write-Host ('Built portable chatgpt-update.exe {0} (Windows x64).' -f $version)
+    & go build -trimpath -o (Join-Path $portable 'chatgpt-update.exe') .
+    if ($LASTEXITCODE) { throw 'Go build failed.' }
+    Copy-Item scripts $portable -Recurse
+    Copy-Item VERSION,README.md $portable
+    $names = @('chatgpt-update.exe','VERSION','README.md','scripts/path.ps1','scripts/prepare-state.ps1','scripts/replace-updater.ps1','scripts/update-chatgpt.ps1')
+    $lines = foreach ($name in $names) {
+        $hash = (Get-FileHash (Join-Path $portable $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+        '{0}  {1}' -f $hash, $name
+    }
+    [IO.File]::WriteAllText((Join-Path $portable 'FILES.sha256'), (($lines -join "`n") + "`n"), [Text.Encoding]::ASCII)
+    Compress-Archive -Path (Join-Path $portable '*') -DestinationPath (Join-Path $out 'chatgpt-update-windows-x64.zip')
+    $zipHash = (Get-FileHash (Join-Path $out 'chatgpt-update-windows-x64.zip') -Algorithm SHA256).Hash.ToLowerInvariant()
+    [IO.File]::WriteAllText((Join-Path $out 'SHA256SUMS.txt'), "$zipHash  chatgpt-update-windows-x64.zip`n", [Text.Encoding]::ASCII)
+    Write-Host "Built portable folder $version. Defender scan is REQUIRED before executing/publishing the built app."
 }
 finally { Pop-Location }
