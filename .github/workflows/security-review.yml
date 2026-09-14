@@ -1,0 +1,85 @@
+name: Investigate reported Defender detection
+on:
+  push:
+    branches: [security/portable-hardening]
+    paths: [.github/workflows/security-review.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  investigate:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Record source for review
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory review -Force | Out-Null
+          git archive --format=zip --output=review/source-review.zip HEAD
+          if ($LASTEXITCODE) { throw 'Cannot archive source' }
+      - name: Mark the reported release as requiring investigation
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $r = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v0.1.0" | ConvertFrom-Json
+          if ($LASTEXITCODE) { throw 'Cannot read reported release' }
+          if ($r.body -notmatch 'SECURITY NOTICE') {
+            $notice = "> **SECURITY NOTICE: do not use this release pending investigation.** A user reported Microsoft Defender detection ``Trojan:Win32/Wacatac.B!ml`` for the original EXE (SHA-256 ``017a28f61b3d6f6aca8a4ed3f44e3a65e0a6bfae5f2fab7ec3f98d5ef68a7a8a``). The cause is not established and no Microsoft false-positive clearance has been obtained. Leave protection enabled; do not add an exclusion. Original assets are retained unchanged for analysis."
+            ($notice + "`n`n" + $r.body) | Set-Content review/release-notice.md -Encoding utf8
+            gh release edit v0.1.0 --repo $env:GITHUB_REPOSITORY --title 'ChatGPT Update 0.1.0 - Defender warning: do not use' --notes-file review/release-notice.md --latest=false
+            if ($LASTEXITCODE) { throw 'Cannot annotate release' }
+          }
+      - name: Scan the exact reported executable without executing it
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $report = [ordered]@{ target='v0.1.0/chatgpt-update.exe'; expectedSha256='017a28f61b3d6f6aca8a4ed3f44e3a65e0a6bfae5f2fab7ec3f98d5ef68a7a8a'; result='inconclusive'; utc=[DateTime]::UtcNow.ToString('o'); executed=$false; notes='A runner scan is not a Microsoft analyst verdict and may differ from endpoint/cloud detection.' }
+          try {
+            $status = Get-MpComputerStatus
+            $report['defenderBefore'] = $status | Select-Object AMServiceEnabled,AntivirusEnabled,RealTimeProtectionEnabled,AMProductVersion,AMEngineVersion,AntivirusSignatureVersion,AntivirusSignatureLastUpdated
+            $candidates = @(Get-ChildItem "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe" -ErrorAction SilentlyContinue | Sort-Object { $_.VersionInfo.FileVersionRaw } -Descending)
+            $mp = if ($candidates.Count) { $candidates[0].FullName } else { "$env:ProgramFiles\Windows Defender\MpCmdRun.exe" }
+            if (-not (Test-Path -LiteralPath $mp)) { throw 'Defender command-line scanner is unavailable.' }
+            $report['scanner'] = $mp
+            & $mp -SignatureUpdate 2>&1 | Out-File review/signature-update.txt
+            $report['signatureUpdateExitCode'] = $LASTEXITCODE
+            & $mp -ValidateMapsConnection 2>&1 | Out-File review/cloud-connection.txt
+            $report['cloudConnectionExitCode'] = $LASTEXITCODE
+            $target = Join-Path $env:RUNNER_TEMP 'reported-chatgpt-update-v0.1.0'
+            New-Item -ItemType Directory $target -Force | Out-Null
+            gh release download v0.1.0 --repo $env:GITHUB_REPOSITORY --pattern chatgpt-update.exe --dir $target
+            if ($LASTEXITCODE) { throw 'Download failed or was blocked. Original executable was not run.' }
+            $file = Join-Path $target 'chatgpt-update.exe'
+            $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            $report['actualSha256'] = $hash
+            if ($hash -cne $report.expectedSha256) { throw 'File differs from the reported build.' }
+            # Custom scan only: this switch ignores exclusions, scans archives,
+            # and records detections without remediating the forensic sample.
+            # It does not disable real-time protection or change preferences.
+            & $mp -Scan -ScanType 3 -File $file -DisableRemediation 2>&1 | Out-File review/original-scan.txt
+            $code = $LASTEXITCODE
+            $report['scanExitCode'] = $code
+            $report['defenderAfter'] = Get-MpComputerStatus | Select-Object AMServiceEnabled,AntivirusEnabled,RealTimeProtectionEnabled,AMProductVersion,AMEngineVersion,AntivirusSignatureVersion,AntivirusSignatureLastUpdated
+            if ($code -eq 0 -and (Test-Path -LiteralPath $file)) {
+              $after = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($after -ceq $hash) { $report['result'] = 'No detection in this runner custom scan; user-reported alert remains unresolved.' }
+            } elseif ($code -eq 2) {
+              $report['result'] = 'Detection or scan error; inspect original-scan.txt.'
+            }
+          } catch { $report['error'] = $_.Exception.Message }
+          $report | ConvertTo-Json -Depth 8 | Set-Content review/original-scan-report.json -Encoding UTF8
+          Get-Content review/original-scan-report.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: defender-investigation
+          path: review/
+          if-no-files-found: error
