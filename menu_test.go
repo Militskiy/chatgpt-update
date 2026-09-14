@@ -34,6 +34,7 @@ func TestMenuShowsVersionAndUpdateHint(t *testing.T) {
 	for _, expected := range []string{
 		"ChatGPT Update " + version,
 		"Tip: 1 updates ChatGPT; 4 updates this utility.",
+		"Self-update: auto-close on success; pause on error.",
 		"4) Update the updater",
 		"0) Exit",
 		"6) Preview colors and progress (offline)",

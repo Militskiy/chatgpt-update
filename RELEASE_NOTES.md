@@ -1,30 +1,26 @@
-# v0.2.4 - close the update helper automatically after success
+# v0.2.5 - end-to-end update test from v0.2.4
 
-- Successful self-updates no longer ask for Enter. The helper explicitly closes its
-  own PowerShell host after package verification, logging, status persistence and cleanup.
-- Handled errors still show their details/log path and wait for Enter; that input then
-  closes the helper instead of leaving a spare PowerShell prompt.
-- Pre-script security/parse errors remain visible through the launcher's existing
-  `-NoExit` option. Execution policy, download markings and trust settings are unchanged.
-- Added regression coverage for the actual interactive new-console handoff: verified
-  success exits without input, failed validation leaves its error window open, and
-  both PowerShell 5.1 and 7 tests exercise success with `-NoExit` and an open stdin.
-- Colors, startup Y/N updates, parent/helper handshake, locks, rollback, ChatGPT
-  deployment and optional .codex backups remain unchanged.
+A deliberately small release to exercise the already-installed v0.2.4 updater.
 
-## First update from 0.2.3
+- Adds one visible menu hint: **Self-update: auto-close on success; pause on error.**
+- Updates the menu regression test and version. No update-engine or helper logic changed.
+- Keeps the v0.2.4 verified-success auto-close and error-only pause, the startup
+  Y/N prompt, hash checks, locking, rollback, colors and optional backups intact.
 
-Run the existing app and approve its startup update offer, or select menu 4. This
-transition is run by 0.2.3's old helper, so its final Enter prompt/window can appear
-one last time. Wait for verified success, close that helper and relaunch; --version
-should return 0.2.4. The next self-update started by 0.2.4 will auto-close on success.
+## Test from your existing v0.2.4 folder
 
-## Security prompt
+1. Run `chatgpt-update` and accept the startup offer for v0.2.5, or choose menu 4.
+2. After Y, let the separate helper finish. Because this update is initiated by
+   v0.2.4, verified success should close that helper without asking for Enter.
+3. Do not reopen the updater while replacement is running. Once the helper closes,
+   run `chatgpt-update --version`; it should return `0.2.5`.
+4. Open the menu and confirm the new hint. ChatGPT and `.codex` are unchanged.
 
-Still unsigned. This release does not bypass, auto-answer or remove a security
-warning. Correctly signed companion scripts and organizational publisher trust are
-the route for policy-controlled deployment; signing the EXE alone is insufficient.
-No signing identity is configured. Keep security controls enabled. The original
-v0.1.0 Wacatac report remains unresolved. Defender custom-scan evidence is attached
-with its hosted-runner cloud/real-time limitations, not a Microsoft analyst verdict.
-Normal-channel delivery is version-scoped to this maintainer-requested UI fix/test.
+Errors remain visible; handled failures pause for Enter. Any existing Windows
+script-security confirmation is separate and unchanged. This release does not
+unblock files, change execution policy, auto-answer warnings, or disable protection.
+
+**Unsigned.** Normal-channel delivery is approved only for this maintainer-requested
+self-update test. The original v0.1.0 Wacatac report remains unresolved. Defender
+custom-scan evidence is attached with hosted-runner cloud/real-time limitations;
+a no-detection custom scan is not a Microsoft analyst verdict.
