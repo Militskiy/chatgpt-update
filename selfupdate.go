@@ -212,23 +212,41 @@ func expectedChecksum(client *http.Client, exe releaseAsset, sum *releaseAsset) 
 type downloadProgress struct {
 	downloaded, total int64
 	last              time.Time
+	started           time.Time
+	lastBucket        int
 }
 
 func (p *downloadProgress) Write(b []byte) (int, error) {
+	if p.started.IsZero() {
+		p.started = time.Now()
+		p.lastBucket = -1
+	}
 	p.downloaded += int64(len(b))
-	if time.Since(p.last) > 250*time.Millisecond {
-		frac := float64(p.downloaded) / float64(p.total)
-		filled := int(frac * 28)
-		if filled > 28 {
-			filled = 28
-		}
-		fmt.Printf("\r[>>] Download updater [%s%s] %5.1f%% | %.1f / %.1f MiB", strings.Repeat("#", filled), strings.Repeat("-", 28-filled), frac*100, float64(p.downloaded)/(1<<20), float64(p.total)/(1<<20))
+	if time.Since(p.last) > 120*time.Millisecond {
+		p.render(false)
 		p.last = time.Now()
 	}
 	return len(b), nil
 }
+func (p *downloadProgress) render(completed bool) {
+	display := formatDownload(p.downloaded, p.total, time.Since(p.started), completed)
+	if useAnimation {
+		fmt.Print("\r\x1b[2K", paint(cyan, oneLine(display, terminalColumns()-2)))
+	} else {
+		bucket := 0
+		if p.total > 0 {
+			bucket = int(10 * float64(p.downloaded) / float64(p.total))
+		}
+		if completed || bucket > p.lastBucket {
+			fmt.Println(display)
+			p.lastBucket = bucket
+		}
+	}
+}
 func downloadArchive(client *http.Client, asset releaseAsset, expected, destination string) error {
+	stop := startActivity("Connecting to updater package download")
 	resp, e := httpGet(client, asset.URL)
+	activityResult(stop, e)
 	if e != nil {
 		return e
 	}
@@ -241,7 +259,9 @@ func downloadArchive(client *http.Client, asset releaseAsset, expected, destinat
 	progress := &downloadProgress{total: asset.Size}
 	n, copyErr := io.Copy(io.MultiWriter(f, h, progress), io.LimitReader(resp.Body, asset.Size+1))
 	closeErr := f.Close()
-	fmt.Println()
+	if useAnimation {
+		fmt.Print("\r\x1b[2K")
+	}
 	if copyErr != nil {
 		return copyErr
 	}
@@ -253,6 +273,10 @@ func downloadArchive(client *http.Client, asset releaseAsset, expected, destinat
 	}
 	if hex.EncodeToString(h.Sum(nil)) != expected {
 		return errors.New("SHA-256 verification failed; existing EXE not changed")
+	}
+	progress.render(true)
+	if useAnimation {
+		fmt.Println()
 	}
 	return nil
 }
@@ -271,18 +295,19 @@ type replacementPlan struct {
 }
 
 func selfUpdate(yes bool) error {
-	fmt.Println("[>>] Checking Militskiy/chatgpt-update public stable releases...")
+	stop := startActivity("Checking updater releases")
+	release, err := latestUpdaterWithTimeout(10 * time.Second)
+	activityResult(stop, err)
+	if err != nil {
+		return err
+	}
+	return installUpdaterRelease(release, yes)
+}
+
+// Called only by explicit self-update or an approved startup update.
+// All the existing archive checks, lock handoff and rollback logic are retained.
+func installUpdaterRelease(release releaseInfo, yes bool) error {
 	client := newHTTPClient()
-	resp, e := httpGet(client, releaseAPI)
-	if e != nil {
-		return e
-	}
-	var release releaseInfo
-	e = json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&release)
-	resp.Body.Close()
-	if e != nil {
-		return e
-	}
 	if release.Draft || release.Prerelease {
 		return errors.New("release is not stable")
 	}
@@ -317,7 +342,9 @@ func selfUpdate(yes bool) error {
 	if !yes && !confirm("Update the updater?") {
 		return nil
 	}
+	stop := startActivity("Reading package checksum")
 	expected, e := expectedChecksum(client, asset, sum)
+	activityResult(stop, e)
 	if e != nil {
 		return e
 	}
@@ -337,11 +364,13 @@ func selfUpdate(yes bool) error {
 	}
 	candidate := filepath.Join(work, "package")
 	next := strings.TrimPrefix(release.Tag, "v")
+	stop = startActivity("Validating downloaded package")
 	records, e := extractPortable(archive, candidate, next)
+	activityResult(stop, e)
 	if e != nil {
 		return e
 	}
-	fmt.Println("[OK] ZIP hash, file set, component hashes, version and x64 EXE format verified.")
+	uiStatus("OK", "ZIP hash, file set, component hashes, version and x64 EXE format verified.")
 	local := os.Getenv("LOCALAPPDATA")
 	if local == "" {
 		return errors.New("LOCALAPPDATA is not set")
@@ -358,7 +387,7 @@ func selfUpdate(yes bool) error {
 	plan := replacementPlan{
 		ParentPID: os.Getpid(), Target: target, Candidate: candidate, NewVersion: next,
 		Previous: filepath.Join(root, ".chatgpt-update-previous-"+id),
-		Log: filepath.Join(logs, "self-update-"+id+".log"), LockName: lockName, Files: records,
+		Log:      filepath.Join(logs, "self-update-"+id+".log"), LockName: lockName, Files: records,
 		StatusPath: filepath.Join(root, updateStateName), HandoffToken: id,
 	}
 	b, e := json.MarshalIndent(plan, "", "  ")
@@ -371,11 +400,13 @@ func selfUpdate(yes bool) error {
 	}
 	// Retain validated stage for troubleshooting once the helper may read it.
 	handedOff = true
-	fmt.Println("[>>] Waiting for update helper readiness...")
-	if e = startReplacementHelper(planPath); e != nil {
+	stop = startActivity("Waiting for update helper readiness")
+	e = startReplacementHelper(planPath)
+	activityResult(stop, e)
+	if e != nil {
 		return fmt.Errorf("%w\nValidated files retained: %s", e, work)
 	}
-	fmt.Println("[OK] Helper is ready. This app will exit; replacement is NOT complete yet.")
+	uiStatus("OK", "Helper is ready. This app will exit; replacement is NOT complete yet.")
 	fmt.Println("Wait for [OK] Updater package is now ... in the helper window before reopening.")
 	fmt.Println("Log:", plan.Log)
 	fmt.Println("Run chatgpt-update again after completion. Previous package files are retained for rollback.")

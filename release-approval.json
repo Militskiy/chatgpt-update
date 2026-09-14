@@ -1,5 +1,5 @@
 {
-  "version": "0.2.2",
+  "version": "0.2.3",
   "channel": "normal-self-update-test",
-  "reason": "Maintainer requested a follow-up release to fix the automatic self-update handoff after confirming the foreground recovery to 0.2.1. Normal-channel delivery for testing, not Microsoft clearance."
+  "reason": "Maintainer requested colored/animated UI and startup updater checks with approval, and a published update to test v0.2.2 handoff. Normal-channel delivery for that test only, not Microsoft clearance."
 }

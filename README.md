@@ -1,8 +1,50 @@
 # ChatGPT Update - portable Windows application
 
-**0.2.2: self-update handoff fix. Windows x64. Unsigned.** Independent utility, not an OpenAI or Microsoft product. Use only with your organization's approval.
+**0.2.3: color UI and startup updater checks. Windows x64. Unsigned.** Independent utility, not an OpenAI or Microsoft product. Use only with your organization's approval.
 
 > The original 0.1.0 EXE has a reported Defender `Trojan:Win32/Wacatac.B!ml` detection. Do not unblock it. The cause remains unconfirmed and no Microsoft analyst clearance has been obtained. See SECURITY.md and the release's Defender report. A local scan does not guarantee endpoint/cloud acceptance.
+
+## New in 0.2.3: color and startup checks
+
+The menu is grouped into App, Local Data and Updater sections. Cyan marks current activity,
+green completion, yellow a question/warning, and red failure. Text labels remain visible
+without colors. ASCII spinners show elapsed time during updater metadata/checksum requests,
+package validation, helper readiness and local backup/restore work. Downloads show one real
+byte-based percentage, transferred size, measured average speed and ETA. The updater ZIP
+only reaches 100% after its size and SHA-256 checks pass. The ChatGPT step panel has an
+animated active marker and elapsed-step label when refreshed during transfers; blocking
+Windows deployment calls keep the active step highlighted, without an invented overall percentage.
+
+**Opening the menu checks for a newer version of this utility, not ChatGPT.** The startup
+metadata request has a five-second total timeout. A newer published normal-channel portable
+release prompts **Y/N before any installer download**. N postpones it for this session and
+opens the menu; option 4 still checks manually. A network error, timeout or malformed release
+opens the menu with a warning. Nothing is installed silently. The same package validation,
+operation lock, v0.2.2 helper handshake and rollback still apply after approval.
+
+Only interactive menu launches perform this automatic check. `check`, `update`, `backup`,
+`restore`, `preview`, `--help`, `--version` and `--verify-package` do not trigger it.
+Redirected input/output and CI do not trigger it either. No scheduler, telemetry, startup
+registration or background service is installed.
+
+```powershell
+chatgpt-update --skip-update-check  # Open menu without an automatic network request
+chatgpt-update --no-color           # Disable colors (also honors NO_COLOR)
+chatgpt-update --no-animation       # Keep colors but disable spinner motion
+chatgpt-update --plain              # Plain scrolling text; no color or animation
+chatgpt-update preview              # Offline simulated demonstration; no app changes
+```
+
+Flags work before or after commands. The child updater script also receives presentation
+preferences. Unsupported/small terminals and redirected output fall back to readable text.
+Menu option **6** opens the offline preview. Spinners stop before asking for input.
+
+### Test the release from 0.2.2
+
+Run your existing `chatgpt-update self-update` or choose 4. Accept 0.2.3, wait for the
+helper's completion message, and relaunch. Verify `chatgpt-update --version` prints 0.2.3.
+The startup auto-check feature is first available after that upgrade. With 0.2.3 current,
+it should report no newer release; it will ask to install when a later eligible release exists.
 
 ## Fixing the update loop
 
@@ -57,6 +99,7 @@ Existing PowerShell policies and downloaded-file markings remain authoritative. 
 3) Restore backup
 4) Update the updater
 5) Add this folder to user PATH
+6) Preview colors and progress (offline)
 0) Exit
 ```
 

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Installs or updates the stable ChatGPT/Codex Windows desktop MSIX for this user.
 .DESCRIPTION
-Version 5.4.0. Intended for Windows x64 with PowerShell 5.1 or PowerShell 7.
+Version 5.5.0 (presentation refresh; installation safeguards unchanged). Intended for Windows x64 with PowerShell 5.1 or PowerShell 7.
 Checks OpenAI's buildVersion feed, then asks Y/N before installation or updating.
 On upgrades, asks separately whether to back up the user's .codex directory.
 Fresh installations do not create a backup. Never uninstalls an existing app.
@@ -80,7 +80,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$UpdaterVersion = '5.4.0'
+$UpdaterVersion = '5.5.0'
 $PackageName = 'OpenAI.Codex'
 $ExpectedPackageFamily = 'OpenAI.Codex_2p2nqsd0c76g0'
 $OpenAIManifestUrl = 'https://persistent.oaistatic.com/codex-app-prod/windows-store-update.json'
@@ -98,6 +98,7 @@ $stage = 'Startup'
 $script:Ui = @{
     Enabled = $false; Live = $false; Visible = $false; Top = 0; Width = 0; Height = 0
     Current = 0; Detail = ''; Transfer = ''; TransferBar = ''; LastBucket = -1
+    Color = $false; Motion = $false; StepStarted = [DateTime]::UtcNow
     Steps = @(
         [pscustomobject]@{ Label = 'Check installed app'; State = 'Pending' }
         [pscustomobject]@{ Label = 'Find an available update'; State = 'Pending' }
@@ -111,6 +112,30 @@ $script:Ui = @{
     )
 }
 
+function Get-UiMarker {
+    param([string]$State, [switch]$Animate, [int]$Frame = 0)
+    switch ($State) {
+        'Done' { return '[OK]  ' }
+        'Running' {
+            if ($Animate) { return @('[|]   ','[/]   ','[-]   ','[\]   ')[([Math]::Abs([long]$Frame) % 4)] }
+            return '[>>]  '
+        }
+        'Skipped' { return '[SKIP]' }
+        'Failed' { return '[FAIL]' }
+        default { return '[ .. ]' }
+    }
+}
+function Get-UiStateColor {
+    param([string]$State)
+    switch ($State) {
+        'Done' { return [ConsoleColor]::Green }
+        'Running' { return [ConsoleColor]::Cyan }
+        'Skipped' { return [ConsoleColor]::DarkYellow }
+        'Failed' { return [ConsoleColor]::Red }
+        default { return [ConsoleColor]::DarkGray }
+    }
+}
+
 function Get-UiLines {
     param([int]$Width = 78)
     $limit = [Math]::Max(30, $Width)
@@ -118,14 +143,15 @@ function Get-UiLines {
     $lines.Add(('ChatGPT/Codex setup v{0}' -f $UpdaterVersion))
     $lines.Add(('-' * [Math]::Min(70, $limit)))
     for ($i = 0; $i -lt $script:Ui.Steps.Count; $i++) {
-        $marker = switch ($script:Ui.Steps[$i].State) {
-            'Done'    { '[OK]  ' }
-            'Running' { '[>>]  ' }
-            'Skipped' { '[SKIP]' }
-            'Failed'  { '[FAIL]' }
-            default   { '[ .. ]' }
+        $frame = [int]([Math]::Floor([Math]::Abs([long][Environment]::TickCount) / 120) % 4)
+        $state = $script:Ui.Steps[$i].State
+        $marker = Get-UiMarker -State $state -Animate:($script:Ui.Motion -and $script:Ui.Live) -Frame $frame
+        $elapsed = ''
+        if ($state -eq 'Running') {
+            $duration = [DateTime]::UtcNow - $script:Ui.StepStarted
+            $elapsed = '  [{0:00}:{1:00}]' -f [int][Math]::Floor($duration.TotalMinutes), $duration.Seconds
         }
-        $lines.Add(('{0} {1}. {2}' -f $marker, ($i + 1), $script:Ui.Steps[$i].Label))
+        $lines.Add(('{0} {1}. {2}{3}' -f $marker, ($i + 1), $script:Ui.Steps[$i].Label, $elapsed))
     }
     $lines.Add('')
     $lines.Add(('  {0}' -f $script:Ui.Detail))
@@ -186,10 +212,12 @@ function Show-UiPanel {
         for ($i = 0; $i -lt $lines.Count; $i++) {
             [Console]::SetCursorPosition(0, $script:Ui.Top + $i)
             [Console]::ForegroundColor = $oldColor
-            if ($lines[$i].StartsWith('[OK]')) { [Console]::ForegroundColor = [ConsoleColor]::Green }
-            elseif ($lines[$i].StartsWith('[>>]')) { [Console]::ForegroundColor = [ConsoleColor]::Cyan }
-            elseif ($lines[$i].StartsWith('[SKIP]')) { [Console]::ForegroundColor = [ConsoleColor]::DarkGray }
-            elseif ($lines[$i].StartsWith('[FAIL]')) { [Console]::ForegroundColor = [ConsoleColor]::Red }
+            if ($script:Ui.Color) {
+                if ($i -ge 2 -and $i -lt (2 + $script:Ui.Steps.Count)) {
+                    [Console]::ForegroundColor = Get-UiStateColor $script:Ui.Steps[$i-2].State
+                } elseif ($i -eq 0 -or $i -eq 13) { [Console]::ForegroundColor = [ConsoleColor]::Cyan }
+                elseif ($i -eq 1 -or $i -eq 14) { [Console]::ForegroundColor = [ConsoleColor]::DarkGray }
+            }
             [Console]::Write($lines[$i].PadRight($width))
         }
         [Console]::SetCursorPosition(0, $script:Ui.Top + $script:Ui.Height)
@@ -211,7 +239,7 @@ function Write-UiMessage {
     )
     Hide-UiPanel
     $arguments = @{ Object = $Object; NoNewline = $NoNewline }
-    if ($PSBoundParameters.ContainsKey('ForegroundColor')) {
+    if ($script:Ui.Color -and $PSBoundParameters.ContainsKey('ForegroundColor')) {
         $arguments['ForegroundColor'] = $ForegroundColor
     }
     Microsoft.PowerShell.Utility\Write-Host @arguments
@@ -221,12 +249,13 @@ function Write-UiMessage {
 function Initialize-Ui {
     $script:Ui.Enabled = $true
     $script:Ui.Live = $false
+    $plain = ($PlainOutput -or $env:CHATGPT_UPDATER_PLAIN -eq '1' -or $env:TERM -eq 'dumb' -or ($env:CI -and $env:CI -ne '0'))
     try {
-        $script:Ui.Live = (-not $PlainOutput -and $Host.Name -eq 'ConsoleHost' -and
-            -not [Console]::IsOutputRedirected -and -not [Console]::IsInputRedirected -and
-            [Console]::WindowWidth -ge 60 -and [Console]::WindowHeight -ge 20)
-    }
-    catch { $script:Ui.Live = $false }
+        $console = ($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected -and -not [Console]::IsInputRedirected)
+        $script:Ui.Color = ($console -and -not $plain -and -not $env:NO_COLOR)
+        $script:Ui.Motion = (-not $plain -and $env:CHATGPT_UPDATER_NO_ANIMATION -ne '1')
+        $script:Ui.Live = ($console -and -not $plain -and $script:Ui.Motion -and [Console]::WindowWidth -ge 60 -and [Console]::WindowHeight -ge 20)
+    } catch { $script:Ui.Live = $false; $script:Ui.Color = $false }
     if (-not $script:Ui.Live) {
         Microsoft.PowerShell.Utility\Write-Host 'Steps: check app -> find update -> confirm -> download -> validate -> close -> backup -> install -> verify'
     }
@@ -242,6 +271,7 @@ function Set-UiStep {
             Write-UiMessage ('[OK] {0}/9 {1}' -f $previous, $script:Ui.Steps[$previous - 1].Label)
         }
     }
+    if ($previous -ne $Number) { $script:Ui.StepStarted = [DateTime]::UtcNow }
     $script:Ui.Current = $Number
     $script:Ui.Steps[$Number - 1].State = 'Running'
     $script:Ui.Detail = $Detail
@@ -345,29 +375,38 @@ function Update-UiTransfer {
     }
 }
 
+function Wait-UiPreview {
+    param([int]$Milliseconds)
+    $end = [DateTime]::UtcNow.AddMilliseconds($Milliseconds)
+    while ([DateTime]::UtcNow -lt $end) {
+        Show-UiPanel
+        Start-Sleep -Milliseconds 120
+    }
+}
+
 function Invoke-UiPreview {
     Write-UiMessage 'PREVIEW ONLY: simulated data. No network, downloads, backups, app closure or installation.' -ForegroundColor Yellow
     Set-UiStep 1 'Detecting the installed app (demo)'
-    Start-Sleep -Milliseconds 500
+    Wait-UiPreview -Milliseconds 500
     Set-UiStep 2 'Finding the available version (demo)'
-    Start-Sleep -Milliseconds 500
+    Wait-UiPreview -Milliseconds 500
     Set-UiStep 3 'Y/N confirmation (simulated approval; no real install)'
-    Start-Sleep -Milliseconds 500
+    Wait-UiPreview -Milliseconds 500
     Skip-UiStep 7
     Set-UiStep 4 'Downloading the MSIX (SIMULATED)'
     $demoSize = [long](739 * 1MB)
     for ($i = 0; $i -le 100; $i += 5) {
         Update-UiTransfer -Received ([long]($demoSize * $i / 100)) -Expected $demoSize -BytesPerSecond (12 * 1MB) -Completed:($i -eq 100)
-        Start-Sleep -Milliseconds 160
+        Wait-UiPreview -Milliseconds 160
     }
     Set-UiStep 5 'Checking checksum, identity and dependencies (demo)'
-    Start-Sleep -Milliseconds 700
+    Wait-UiPreview -Milliseconds 700
     Set-UiStep 6 'Closing the app (demo only)'
-    Start-Sleep -Milliseconds 500
+    Wait-UiPreview -Milliseconds 500
     Set-UiStep 8 'Installing... percentage is not estimated (demo)'
-    Start-Sleep -Milliseconds 1200
+    Wait-UiPreview -Milliseconds 1200
     Set-UiStep 9 'Verifying version (demo)'
-    Start-Sleep -Milliseconds 500
+    Wait-UiPreview -Milliseconds 500
     Finish-UiSteps 'Preview complete. Nothing was installed or changed.'
 }
 

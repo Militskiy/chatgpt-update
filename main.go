@@ -24,7 +24,7 @@ func embeddedVersion() string {
 	return strings.TrimSpace(string(b))
 }
 func readLine(prompt string) (string, error) {
-	fmt.Print(prompt)
+	fmt.Print(paint(yellow, prompt))
 	s, err := input.ReadString('\n')
 	if err != nil {
 		return "", err
@@ -47,7 +47,7 @@ func confirm(prompt string) bool {
 	}
 }
 func main() {
-	args := os.Args[1:]
+	args, opts := parseUIOptions(os.Args[1:])
 	if len(args) == 1 && args[0] == "--verify-package" {
 		exe, err := os.Executable()
 		if err == nil {
@@ -72,6 +72,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "This app runs on Windows x64. Source tests can run on other systems.")
 		os.Exit(1)
 	}
+	restoreUI := configureUI(opts)
+	defer restoreUI()
+	startup := shouldCheckAtStartup(args, opts, interactiveConsole())
 	if len(args) == 0 {
 		args = []string{"menu"}
 	}
@@ -81,7 +84,17 @@ func main() {
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		restoreUI()
 		os.Exit(1)
+	}
+	if startup {
+		err = runStartupCheck()
+		if errors.Is(err, errUpdating) {
+			return
+		}
+		if err != nil {
+			uiStatus("FAIL", "Startup self-update did not complete: "+err.Error())
+		}
 	}
 	err = dispatch(args)
 	if errors.Is(err, errUpdating) {
@@ -89,6 +102,7 @@ func main() {
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "\nERROR:", err)
+		restoreUI()
 		os.Exit(1)
 	}
 }
@@ -108,10 +122,18 @@ chatgpt-update self-update             Update the complete portable folder from 
 chatgpt-update self-update --yes        Approve a newer updater noninteractively
 chatgpt-update path add                Add this EXE's folder to your user PATH
 chatgpt-update path remove             Remove this folder from your user PATH
-chatgpt-update preview                 Simulated ChatGPT update progress
+chatgpt-update preview                 Offline demonstration of colors, activity and download progress
 chatgpt-update --version               Print only the updater version
 
-Updates require the public internet; backup/restore work offline.
+Menu startup checks for a newer UPDATER (5 second limit) and asks before downloading.
+N postpones it. Metadata errors still open the menu. Other commands do not self-check.
+--skip-update-check  Open the menu without its automatic update check
+--no-color          No ANSI colors (also honors NO_COLOR)
+--no-animation      Keep colors, disable spinner motion
+--plain             Plain scrolling output, no colors or animation
+These options can appear before or after a command.
+
+Updates require the public internet; backup/restore and preview work offline.
 Extract the WHOLE portable ZIP. No MSI, Store account, PowerShell 7 or Go is needed.
 Visible scripts beside the EXE use Windows PowerShell 5.1 and existing Windows policies.
 No scripts are extracted into TEMP; no execution policy override is applied.
@@ -127,6 +149,7 @@ func dispatch(args []string) error {
 		if len(args) != 1 {
 			return errors.New("preview takes no arguments")
 		}
+		previewActivity()
 		return runScript("update-chatgpt.ps1", "-Preview")
 	}
 	unlock, err := acquireOperationLock()
@@ -196,15 +219,7 @@ func updateArgs(args []string) ([]string, error) {
 }
 func menu() error {
 	for {
-		fmt.Printf("\nChatGPT Update %s | portable Windows app\n", version)
-		fmt.Println("------------------------------------------------")
-		fmt.Println("Tip: 1 updates ChatGPT; 4 updates this utility.")
-		fmt.Println("1) Check for ChatGPT update / install")
-		fmt.Println("2) Create backup")
-		fmt.Println("3) Restore backup")
-		fmt.Println("4) Update the updater")
-		fmt.Println("5) Add this folder to user PATH")
-		fmt.Println("0) Exit")
+		printMenu()
 		answer, err := readLine("Choose a number: ")
 		if errors.Is(err, io.EOF) {
 			return nil
@@ -226,8 +241,10 @@ func menu() error {
 			cmd = []string{"self-update"}
 		case "5":
 			cmd = []string{"path", "add"}
+		case "6":
+			cmd = []string{"preview"}
 		default:
-			fmt.Println("Choose 0, 1, 2, 3, 4 or 5.")
+			fmt.Println("Choose a number from 0 to 6.")
 			continue
 		}
 		if err := dispatch(cmd); errors.Is(err, errUpdating) {

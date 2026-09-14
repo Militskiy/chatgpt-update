@@ -254,8 +254,9 @@ func backupInteractive() error {
 	if e := runScript("prepare-state.ps1"); e != nil {
 		return e
 	}
-	fmt.Println("[>>] Copying and verifying state...")
+	stop := startActivity("Copying and verifying local backup")
 	path, e := createBackup(state, root)
+	activityResult(stop, e)
 	if e != nil {
 		return e
 	}
@@ -404,8 +405,9 @@ func restoreInteractive() error {
 		return nil
 	}
 	source := list[n-1]
-	fmt.Println("[>>] Checking backup integrity...")
+	stop := startActivity("Checking backup integrity")
 	_, legacy, e := verifyBackup(source)
+	activityResult(stop, e)
 	if e != nil {
 		return e
 	}
@@ -424,7 +426,9 @@ func restoreInteractive() error {
 	if e := runScript("prepare-state.ps1"); e != nil {
 		return e
 	}
+	stop = startActivity("Restoring backup; preserving current state")
 	safety, e := restoreBackup(source, state, root)
+	activityResult(stop, e)
 	if e != nil {
 		return e
 	}
