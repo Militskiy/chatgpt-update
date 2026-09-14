@@ -1,5 +1,5 @@
 {
-  "version": "0.2.3",
+  "version": "0.2.4",
   "channel": "normal-self-update-test",
-  "reason": "Maintainer requested colored/animated UI and startup updater checks with approval, and a published update to test v0.2.2 handoff. Normal-channel delivery for that test only, not Microsoft clearance."
+  "reason": "Maintainer requested automatic helper-window closure on successful self-update and retained error visibility, delivered through the existing startup update check. Security prompts and checks remain unchanged; this is not signing or Microsoft clearance."
 }

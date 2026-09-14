@@ -168,7 +168,16 @@ try {
     if ($null -ne $mutex) { $mutex.Dispose() }
     if ($null -ne $ready -and (Test-Path -LiteralPath $ready)) { Remove-Item -LiteralPath $ready -Force -ErrorAction SilentlyContinue }
     if ($ok -and $null -ne $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
-    if (-not $NoPause) { [void](Read-Host 'Press Enter to close this window') }
+    # Only failed updates wait for input. Successful updates must not leave a
+    # second shell behind, including when the launcher uses -NoExit so a
+    # pre-script security/parse error remains visible.
+    if (-not $ok -and -not $NoPause) {
+        [void](Read-Host 'Update failed. Press Enter to close this window')
+    }
 }
-if (-not $ok) { exit 1 }
-exit 0
+$exitCode = if ($ok) { 0 } else { 1 }
+# In Windows PowerShell -NoExit -File, exit alone can return to the prompt.
+# Ask the hosting console to end explicitly, after cleanup and user input
+# (on failure only). This closes our helper, never the caller's terminal.
+$Host.SetShouldExit($exitCode)
+exit $exitCode
