@@ -36,6 +36,7 @@ func TestMenuShowsVersionAndUpdateHint(t *testing.T) {
 		"Tip: 1 updates ChatGPT; 4 updates this utility.",
 		"4) Update the updater",
 		"0) Exit",
+		"6) Preview colors and progress (offline)",
 	} {
 		if !strings.Contains(string(output), expected) {
 			t.Errorf("menu missing %q; got %q", expected, output)

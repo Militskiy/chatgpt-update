@@ -1,18 +1,30 @@
-# v0.2.2 - reliable self-update handoff and result reporting
+# v0.2.3 - color UI, animated activity and startup update approval
 
-Fixes the automatic helper launch path that could return to PowerShell while leaving the old updater installed.
+- Colored, grouped numbered menu; added option 6 for an offline UI preview.
+- Animated ASCII activity indicators and elapsed time for updater checks, validation,
+  backup/restore and helper readiness. Spinners stop before prompts.
+- Updater download progress includes real transferred bytes, one percentage, speed and ETA;
+  final 100% is printed only after size/hash verification. No fake installation percentage.
+- ChatGPT step panel adds animated transfer-stage markers and elapsed-step labels.
+- Interactive menu startup automatically checks this repository for a newer updater.
+  Five-second metadata timeout; asks Y/N before download/install. N or unavailable metadata
+  still opens the menu. Normal releases only. CLI/preview/verification calls stay independent.
+- Added --skip-update-check, --no-color, --no-animation and global --plain; honors NO_COLOR.
+- Retained the v0.2.2 PowerShell-child environment correction, real-console handoff,
+  readiness acknowledgement, lock continuity, verification and rollback.
 
-- Fixes PowerShell 7 -> updater EXE -> Windows PowerShell 5.1 module-path inheritance. The reproduced automatic-launch failure was `Get-FileHash` not found. Only the child's inherited PSModulePath is removed so Windows PowerShell constructs its own compatible module paths; the parent, PATH, proxies and execution-policy settings are unchanged.
-- Launches the visible helper with proper new-console input/output rather than null streams.
-- Waits for validated helper readiness and explicitly acknowledges it before the parent exits. A blocked, failed or unresponsive helper is not treated as a successful handoff.
-- Keeps the operation lock across parent exit, so reopening early cannot race the replacement.
-- Records success/failure in the log and a diagnostic status file in the portable folder. Next launch reports completion, a failure, or a still-running update.
-- Tests exercise the actual new-console launcher from PowerShell 7, locked-target parent exit, early reopen, failure reporting and rollback in Windows CI.
+## Test using your current 0.2.2
 
-## Migrating from 0.2.0/0.2.1
+Choose 4 or run `chatgpt-update self-update`; accept 0.2.3. Wait for the helper to say
+`[OK] Updater package is now 0.2.3.`, then relaunch. No manual ZIP migration is needed
+from 0.2.2. New menu/animation/startup behavior becomes active after this update.
+Use menu 6 or `chatgpt-update preview` for a simulated, offline demonstration.
 
-The old app launches its own old helper, so publishing this release cannot fix that initial handoff. Extract the **entire** 0.2.2 ZIP into a clean folder once, or use the previously confirmed foreground recovery of a validated staged update. Do not edit companion scripts individually: their hashes are bound to the EXE. After that, future self-updates use the corrected launcher.
+The startup prompt for a newer version will appear when a later eligible release is published.
+Startup timeout, decline, current/old releases, invalid metadata, and approved/failing handoff
+are covered by offline tests; no test silently installs ChatGPT or touches real user data.
 
-The ChatGPT installation/update engine, backup/restore semantics and package checks are unchanged. No security settings are changed. Keep the EXE and scripts together. The status file is diagnostic only; it never authorizes an installation.
-
-**Unsigned.** The v0.1.0 Wacatac alert remains unresolved; do not unblock that release. The attached Defender custom-scan evidence records cloud/real-time coverage limitations. A local no-detection result is not a Microsoft analyst verdict. Normal-channel delivery is version-scoped to this maintainer-requested fix/test.
+**Unsigned.** Normal-channel publication is scoped to the maintainer's request to test
+self-updating and this UI. It is not Microsoft security clearance. The v0.1.0 Wacatac
+report remains unresolved. Attached Defender custom-scan evidence records missing
+cloud/real-time coverage; keep protections enabled and respect corporate policy.

@@ -13,6 +13,8 @@ foreach ($file in @(Get-ChildItem (Join-Path $root 'scripts') -Filter *.ps1)) {
 }
 & (Join-Path $PSScriptRoot 'Test-UpdateEngine.ps1')
 if ($LASTEXITCODE) { throw 'Engine tests failed.' }
+& (Join-Path $PSScriptRoot 'Test-Ui.ps1')
+if ($LASTEXITCODE) { throw 'UI tests failed.' }
 $expected=(Get-Content (Join-Path $root 'VERSION') -Raw).Trim()
 if ((& $Executable --version | Out-String).Trim() -cne $expected -or $LASTEXITCODE) { throw 'EXE version test failed.' }
 if ((& $Executable --verify-package | Out-String).Trim() -cne $expected -or $LASTEXITCODE) { throw 'Sidecar package test failed.' }
