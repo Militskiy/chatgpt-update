@@ -45,6 +45,10 @@ try {
     & $hostExe -NoProfile -File (Join-Path $temp 'scripts/replace-updater.ps1') -PlanPath $planPath -NoPause
     if ($LASTEXITCODE -eq 0) { throw 'Changed staging package was accepted.' }
     if (Test-Path $plan.previous) { throw 'Old package touched before stage validation.' }
+    $statusFile=Join-Path $temp '.chatgpt-update-status.json'
+    $state=Get-Content -LiteralPath $statusFile -Raw | ConvertFrom-Json
+    if ($state.phase -cne 'failed' -or $state.message -notmatch 'Staged component changed') { throw 'Startup validation failure not persisted.' }
+    if ((Get-Content -LiteralPath $plan.log -Raw) -notmatch '\[FAIL\]') { throw 'Helper failure not recorded in log.' }
     Copy-Item (Join-Path $portable 'scripts/path.ps1') (Join-Path $candidate 'scripts/path.ps1') -Force
     # Force a late replacement failure while preserving the previous EXE.
     # A changed old README makes rollback observable instead of comparing
@@ -69,5 +73,7 @@ try {
         if ((Get-FileHash (Join-Path $temp $record.path) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $record.sha256) { throw 'Replacement component mismatch.' }
     }
     if ((& $target --verify-package | Out-String).Trim() -cne $expected -or $LASTEXITCODE) { throw 'Replaced package invalid.' }
-    Write-Host 'PASS: tampered-stage rejection and complete-package replacement with preserved old files'
+    $state=Get-Content -LiteralPath $statusFile -Raw | ConvertFrom-Json
+    if ($state.phase -cne 'success' -or $state.version -cne $expected) { throw 'Successful replacement status not recorded.' }
+    Write-Host 'PASS: tampered-stage rejection, persistent results and complete-package replacement with preserved old files'
 } finally { Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue }

@@ -14,3 +14,5 @@ func isReparsePoint(path string) bool {
 	return e != nil || f.Mode()&os.ModeSymlink != 0
 }
 func acquireOperationLock() (func(), error) { return func() {}, nil }
+
+func helperRunning(pid int) (bool, error) { return false, nil }

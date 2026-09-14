@@ -75,7 +75,15 @@ func main() {
 	if len(args) == 0 {
 		args = []string{"menu"}
 	}
-	err := dispatch(args)
+	exe, err := os.Executable()
+	if err == nil {
+		err = showLastUpdate(filepath.Dir(exe))
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	err = dispatch(args)
 	if errors.Is(err, errUpdating) {
 		return
 	}
