@@ -1,11 +1,94 @@
-name: Build portable app
+name: Build, test and release portable app
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: portable-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
-  build:
+  windows:
     runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
     steps:
-      - run: Write-Host 'Build setup in progress; full workflow follows with source commit.'
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # One-time import of the reviewed source package. Readable files are committed.
+      # This archive contains no workflows, binaries, credentials or app state.
+      - name: Import initial source package when present
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path '.bootstrap/source-01.bin')) { exit 0 }
+          $archive = Join-Path $env:RUNNER_TEMP 'chatgpt-update-source.zip'
+          $stream = [IO.File]::Create($archive)
+          try {
+            Get-ChildItem '.bootstrap/source-*.bin' | Sort-Object Name | ForEach-Object {
+              $bytes = [IO.File]::ReadAllBytes($_.FullName)
+              $stream.Write($bytes, 0, $bytes.Length)
+            }
+          } finally { $stream.Dispose() }
+          $expected = '4e4823ea8f5e0f01623c84aabde5e7a075568aa6e0d4e28d483b4786f2d27029'
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) { throw 'Source package hash mismatch' }
+          $staging = Join-Path $env:RUNNER_TEMP ('source-' + [Guid]::NewGuid().ToString('N'))
+          Expand-Archive $archive $staging
+          Get-ChildItem $staging -Force | ForEach-Object {
+            if ($_.Name -in @('.git', '.github', '.bootstrap')) { throw 'Forbidden path in source package' }
+            Copy-Item -LiteralPath $_.FullName -Destination . -Recurse -Force
+          }
+          Remove-Item .bootstrap -Recurse -Force
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --all
+          git commit -m 'Import portable updater source, tests and documentation'
+          if ($LASTEXITCODE) { throw 'Source commit failed' }
+          git push origin HEAD:main
+          if ($LASTEXITCODE) { throw 'Source push failed; not publishing a release' }
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: stable
+          cache: false
+      - name: Go tests
+        shell: pwsh
+        run: |
+          go vet ./...
+          if ($LASTEXITCODE) { throw 'go vet failed' }
+          go test -v ./...
+          if ($LASTEXITCODE) { throw 'go test failed' }
+      - name: Build Windows x64 EXE
         shell: powershell
+        run: ./build.ps1
+      - name: Windows PowerShell 5.1 tests
+        shell: powershell
+        run: ./tests/Test-Scripts.ps1
+      - name: PowerShell 7 tests
+        shell: pwsh
+        run: ./tests/Test-Scripts.ps1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: chatgpt-update-windows-x64
+          path: |
+            dist/chatgpt-update.exe
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+      - name: Publish a new stable version (existing releases are never replaced)
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $tag = 'v' + $version
+          $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          if ($LASTEXITCODE) { throw 'Cannot query releases' }
+          if (@($releases | Where-Object tag_name -eq $tag).Count -gt 0) {
+            Write-Host "Release $tag already exists. Bump VERSION for a new release; existing assets were not changed."
+            exit 0
+          }
+          $target = git rev-parse HEAD
+          gh release create $tag dist/chatgpt-update.exe dist/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --target $target --title "ChatGPT Update $version (portable Windows x64)" --notes-file RELEASE_NOTES.md
+          if ($LASTEXITCODE) { throw 'Release publication failed' }
