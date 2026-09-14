@@ -254,19 +254,20 @@ func downloadArchive(client *http.Client, asset releaseAsset, expected, destinat
 	if hex.EncodeToString(h.Sum(nil)) != expected {
 		return errors.New("SHA-256 verification failed; existing EXE not changed")
 	}
-
 	return nil
 }
 
 type replacementPlan struct {
-	ParentPID  int          `json:"parentPid"`
-	Target     string       `json:"target"`
-	Candidate  string       `json:"candidate"`
-	NewVersion string       `json:"newVersion"`
-	Previous   string       `json:"previous"`
-	Log        string       `json:"log"`
-	LockName   string       `json:"lockName"`
-	Files      []fileRecord `json:"files"`
+	ParentPID    int          `json:"parentPid"`
+	Target       string       `json:"target"`
+	Candidate    string       `json:"candidate"`
+	NewVersion   string       `json:"newVersion"`
+	Previous     string       `json:"previous"`
+	Log          string       `json:"log"`
+	LockName     string       `json:"lockName"`
+	Files        []fileRecord `json:"files"`
+	StatusPath   string       `json:"statusPath"`
+	HandoffToken string       `json:"handoffToken"`
 }
 
 func selfUpdate(yes bool) error {
@@ -354,9 +355,12 @@ func selfUpdate(yes bool) error {
 		return e
 	}
 	id := uniqueName()
-	plan := replacementPlan{os.Getpid(), target, candidate, next,
-		filepath.Join(root, ".chatgpt-update-previous-"+id),
-		filepath.Join(logs, "self-update-"+id+".log"), lockName, records}
+	plan := replacementPlan{
+		ParentPID: os.Getpid(), Target: target, Candidate: candidate, NewVersion: next,
+		Previous: filepath.Join(root, ".chatgpt-update-previous-"+id),
+		Log: filepath.Join(logs, "self-update-"+id+".log"), LockName: lockName, Files: records,
+		StatusPath: filepath.Join(root, updateStateName), HandoffToken: id,
+	}
 	b, e := json.MarshalIndent(plan, "", "  ")
 	if e != nil {
 		return e
@@ -365,12 +369,14 @@ func selfUpdate(yes bool) error {
 	if e = os.WriteFile(planPath, b, 0600); e != nil {
 		return e
 	}
-	if e = startReplacementHelper(planPath); e != nil {
-		return e
-	}
+	// Retain validated stage for troubleshooting once the helper may read it.
 	handedOff = true
-	fmt.Println("[>>] A visible helper window will finish after this updater exits.")
-	fmt.Println("If Windows blocks the helper, nothing is overwritten. Ask IT to approve the scripts.")
+	fmt.Println("[>>] Waiting for update helper readiness...")
+	if e = startReplacementHelper(planPath); e != nil {
+		return fmt.Errorf("%w\nValidated files retained: %s", e, work)
+	}
+	fmt.Println("[OK] Helper is ready. This app will exit; replacement is NOT complete yet.")
+	fmt.Println("Wait for [OK] Updater package is now ... in the helper window before reopening.")
 	fmt.Println("Log:", plan.Log)
 	fmt.Println("Run chatgpt-update again after completion. Previous package files are retained for rollback.")
 	return errUpdating

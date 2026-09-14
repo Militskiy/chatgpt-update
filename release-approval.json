@@ -1,5 +1,5 @@
 {
-  "version": "0.2.1",
+  "version": "0.2.2",
   "channel": "normal-self-update-test",
-  "reason": "Maintainer-requested v0.2.0 to v0.2.1 self-update test following a successful personal-PC test. Not Microsoft clearance."
+  "reason": "Maintainer requested a follow-up release to fix the automatic self-update handoff after confirming the foreground recovery to 0.2.1. Normal-channel delivery for testing, not Microsoft clearance."
 }

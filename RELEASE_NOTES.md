@@ -1,15 +1,18 @@
-# v0.2.1 - self-update test release
+# v0.2.2 - reliable self-update handoff and result reporting
 
-A small visible change for testing the portable updater's 0.2.0 -> 0.2.1 update path:
+Fixes the automatic helper launch path that could return to PowerShell while leaving the old updater installed.
 
-- The menu now displays: **Tip: 1 updates ChatGPT; 4 updates this utility.**
-- Version is now 0.2.1; ChatGPT installation, backup/restore, package validation and self-update code are unchanged.
-- Added a menu regression test. Existing Windows PowerShell 5.1/7, replacement/rollback, Go and Defender custom-scan checks remain required.
+- Fixes PowerShell 7 -> updater EXE -> Windows PowerShell 5.1 module-path inheritance. The reproduced automatic-launch failure was `Get-FileHash` not found. Only the child's inherited PSModulePath is removed so Windows PowerShell constructs its own compatible module paths; the parent, PATH, proxies and execution-policy settings are unchanged.
+- Launches the visible helper with proper new-console input/output rather than null streams.
+- Waits for validated helper readiness and explicitly acknowledges it before the parent exits. A blocked, failed or unresponsive helper is not treated as a successful handoff.
+- Keeps the operation lock across parent exit, so reopening early cannot race the replacement.
+- Records success/failure in the log and a diagnostic status file in the portable folder. Next launch reports completion, a failure, or a still-running update.
+- Tests exercise the actual new-console launcher from PowerShell 7, locked-target parent exit, early reopen, failure reporting and rollback in Windows CI.
 
-From your existing, permitted v0.2.0 portable folder, choose **4** or run `chatgpt-update self-update`. Confirm the update, wait for the helper to finish, then restart the app and check `chatgpt-update --version` returns `0.2.1`.
+## Migrating from 0.2.0/0.2.1
 
-**Release-channel exception:** the maintainer requested a live self-update test after a successful personal-PC test of v0.2.0. This version is published as a normal GitHub release because v0.2.0 only queries `/releases/latest` and rejects prereleases. This is delivery metadata, NOT Microsoft security clearance or corporate deployment approval. The exception applies only to version 0.2.1; subsequent versions default to prerelease without a matching release approval.
+The old app launches its own old helper, so publishing this release cannot fix that initial handoff. Extract the **entire** 0.2.2 ZIP into a clean folder once, or use the previously confirmed foreground recovery of a validated staged update. Do not edit companion scripts individually: their hashes are bound to the EXE. After that, future self-updates use the corrected launcher.
 
-**Unsigned.** The original v0.1.0 Wacatac report remains unresolved; do not unblock v0.1.0. Updated-definition custom-scan evidence is attached, including cloud/real-time coverage limitations. Signing credentials have not been configured. Do not disable antivirus, change organizational policy or add exclusions to use this build.
+The ChatGPT installation/update engine, backup/restore semantics and package checks are unchanged. No security settings are changed. Keep the EXE and scripts together. The status file is diagnostic only; it never authorizes an installation.
 
-Keep the EXE and its companion scripts together. Updating this utility does not update ChatGPT or modify `.codex` state. Previous portable components are retained for rollback.
+**Unsigned.** The v0.1.0 Wacatac alert remains unresolved; do not unblock that release. The attached Defender custom-scan evidence records cloud/real-time coverage limitations. A local no-detection result is not a Microsoft analyst verdict. Normal-channel delivery is version-scoped to this maintainer-requested fix/test.
