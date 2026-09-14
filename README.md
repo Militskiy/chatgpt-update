@@ -1,8 +1,18 @@
 # ChatGPT Update - portable Windows application
 
-**0.2.4: automatic helper closure after verified success. Windows x64. Unsigned.** Independent utility, not an OpenAI or Microsoft product. Use only with your organization's approval.
+**0.2.5: end-to-end self-update test and menu hint. Windows x64. Unsigned.** Independent utility, not an OpenAI or Microsoft product. Use only with your organization's approval.
 
 > The original 0.1.0 EXE has a reported Defender `Trojan:Win32/Wacatac.B!ml` detection. Do not unblock it. The cause remains unconfirmed and no Microsoft analyst clearance has been obtained. See SECURITY.md and the release's Defender report. A local scan does not guarantee endpoint/cloud acceptance.
+
+## New in 0.2.5: test the v0.2.4 update flow
+
+The only runtime change is a menu hint: **Self-update: auto-close on success; pause
+on error.** To exercise the existing helper fix, launch your installed v0.2.4 and
+approve the startup offer for v0.2.5 (or use menu 4). On verified success its helper
+should close without keyboard input. Then `chatgpt-update --version` should print
+`0.2.5`, and the menu should display the new hint. The helper, updater engine, trust
+checks and backup/restore behavior are unchanged. Windows script-security prompts
+are not suppressed. See RELEASE_NOTES.md for the test steps and limitations.
 
 ## New in 0.2.4: close on success, retain failures
 
@@ -57,7 +67,7 @@ registration or background service is installed.
 ```powershell
 chatgpt-update --skip-update-check  # Open menu without an automatic network request
 chatgpt-update --no-color           # Disable colors (also honors NO_COLOR)
-chatgpt-update --no-animation       # Keep colors but disable spinner motion
+chatgpt-update --no-animation       # Keep colors, disable spinner motion
 chatgpt-update --plain              # Plain scrolling text; no color or animation
 chatgpt-update preview              # Offline simulated demonstration; no app changes
 ```
@@ -187,4 +197,4 @@ Run the script suite in Windows PowerShell 5.1 and PowerShell 7. Build regenerat
 
 CI scans the full portable folder and final ZIP with updated Defender intelligence before launching the built EXE. Detections, unavailable/failed scanners or modified artifacts prevent publication. Raw reports retain file hashes and cloud/real-time coverage limitations. Windows tests now exercise actual new-console input/output, automatic helper readiness, parent exit with a locked target, early reopen, logged validation failure, package replacement and rollback. Tests use temporary fixtures; they do not install ChatGPT or change real user PATH/backups.
 
-Publication defaults to prerelease. A normal-channel release requires matching version-scoped maintainer approval in `release-approval.json`. Version 0.2.4 is approved for the requested helper-window fix/test, not a Microsoft malware clearance. Existing tags and assets are never replaced.
+Publication defaults to prerelease. A normal-channel release requires matching version-scoped maintainer approval in `release-approval.json`. Version 0.2.5 is approved for the requested end-to-end test from v0.2.4, not a Microsoft malware clearance. Existing tags and assets are never replaced.

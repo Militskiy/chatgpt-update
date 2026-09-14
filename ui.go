@@ -104,6 +104,7 @@ func printMenu() {
 	fmt.Println(paint(cyan, "ChatGPT Update "+version) + paint(muted, " | portable Windows app"))
 	fmt.Println(paint(muted, strings.Repeat("-", 58)))
 	fmt.Println(paint(muted, "Tip: 1 updates ChatGPT; 4 updates this utility."))
+	fmt.Println(paint(muted, "Self-update: auto-close on success; pause on error."))
 	fmt.Println(paint(cyan, "  APP"))
 	fmt.Println("  " + paint(cyan, "1)") + " Check for ChatGPT update / install")
 	fmt.Println(paint(violet, "  LOCAL DATA"))
