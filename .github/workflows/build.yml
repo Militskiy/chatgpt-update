@@ -1,0 +1,11 @@
+name: Build portable app
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - run: Write-Host 'Build setup in progress; full workflow follows with source commit.'
+        shell: powershell
